@@ -5,18 +5,21 @@ import { verifyPassword, setAuthCookie, clearAuthCookie } from '@/lib/auth';
 export async function POST(request: Request) {
   try {
     const { password } = await request.json();
-    
+
     if (!password) {
       return NextResponse.json({ error: '請輸入密碼' }, { status: 400 });
     }
-    
-    if (!verifyPassword(password)) {
+
+    const role = verifyPassword(password);
+
+    if (!role) {
       return NextResponse.json({ error: '密碼錯誤' }, { status: 401 });
     }
-    
-    await setAuthCookie();
-    return NextResponse.json({ data: { success: true } });
-  } catch {
+
+    await setAuthCookie(role);
+    return NextResponse.json({ data: { success: true, role } });
+  } catch (err) {
+    console.error('登入錯誤:', err);
     return NextResponse.json({ error: '伺服器錯誤' }, { status: 500 });
   }
 }

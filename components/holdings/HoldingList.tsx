@@ -9,9 +9,10 @@ interface Props {
   totalValue: number; // 總資產價值（用於計算權重）
   onEdit: (holding: HoldingWithQuote) => void;
   onDelete: (holding: HoldingWithQuote) => void;
+  readOnly?: boolean; // 訪客模式，隱藏編輯/刪除按鈕
 }
 
-export default function HoldingList({ holdings, exchangeRate, totalValue, onEdit, onDelete }: Props) {
+export default function HoldingList({ holdings, exchangeRate, totalValue, onEdit, onDelete, readOnly = false }: Props) {
   if (holdings.length === 0) {
     return (
       <div className="text-center py-12 text-muted">
@@ -146,22 +147,24 @@ export default function HoldingList({ holdings, exchangeRate, totalValue, onEdit
                   }
                 </td>
                 <td className="py-3 text-right">
-                  <div className="flex items-center justify-end gap-1">
-                    <button
-                      onClick={() => onEdit(holding)}
-                      className="p-1.5 rounded hover:bg-border transition-colors"
-                      title="編輯"
-                    >
-                      <Pencil className="w-4 h-4" />
-                    </button>
-                    <button
-                      onClick={() => onDelete(holding)}
-                      className="p-1.5 rounded hover:bg-border transition-colors text-danger"
-                      title="刪除"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
+                  {!readOnly && (
+                    <div className="flex items-center justify-end gap-1">
+                      <button
+                        onClick={() => onEdit(holding)}
+                        className="p-1.5 rounded hover:bg-border transition-colors"
+                        title="編輯"
+                      >
+                        <Pencil className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => onDelete(holding)}
+                        className="p-1.5 rounded hover:bg-border transition-colors text-danger"
+                        title="刪除"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  )}
                 </td>
               </tr>
             );
@@ -234,22 +237,24 @@ export default function HoldingList({ holdings, exchangeRate, totalValue, onEdit
                     <span>費用率: {(holding.expenseRatio * 100).toFixed(3)}%</span>
                   )}
                 </div>
-                <div className="flex items-center gap-2 ml-auto">
-                  <button
-                    onClick={() => onEdit(holding)}
-                    className="p-1.5 rounded hover:bg-border transition-colors"
-                    title="編輯"
-                  >
-                    <Pencil className="w-4 h-4" />
-                  </button>
-                  <button
-                    onClick={() => onDelete(holding)}
-                    className="p-1.5 rounded hover:bg-border transition-colors text-danger"
-                    title="刪除"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
+                {!readOnly && (
+                  <div className="flex items-center gap-2 ml-auto">
+                    <button
+                      onClick={() => onEdit(holding)}
+                      className="p-1.5 rounded hover:bg-border transition-colors"
+                      title="編輯"
+                    >
+                      <Pencil className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => onDelete(holding)}
+                      className="p-1.5 rounded hover:bg-border transition-colors text-danger"
+                      title="刪除"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           );

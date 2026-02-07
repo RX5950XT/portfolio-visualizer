@@ -58,13 +58,12 @@ export default function LoginPage() {
         {/* 表單 */}
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="relative">
-            <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted" />
             <input
               type={showPassword ? 'text' : 'password'}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="輸入密碼"
-              className="w-full pl-10 pr-10"
+              className="w-full pl-4 pr-10"
               autoFocus
             />
             <button

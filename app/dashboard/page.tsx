@@ -64,6 +64,10 @@ export default function DashboardPage() {
   // 圖表刷新 key（變化時觸發圖表重新載入）
   const [chartRefreshKey, setChartRefreshKey] = useState<number>(0);
 
+  // 用戶角色狀態
+  const [userRole, setUserRole] = useState<'admin' | 'guest' | null>(null);
+  const isAdmin = userRole === 'admin';
+
   // 載入持股資料
   const loadHoldings = useCallback(async () => {
     try {
@@ -268,6 +272,22 @@ export default function DashboardPage() {
     refreshData();
   }, [refreshData]);
 
+  // 載入用戶角色
+  useEffect(() => {
+    const loadUserRole = async () => {
+      try {
+        const res = await fetch('/api/auth/me');
+        const { data } = await res.json();
+        if (data?.role) {
+          setUserRole(data.role);
+        }
+      } catch (err) {
+        console.error('載入用戶角色失敗:', err);
+      }
+    };
+    loadUserRole();
+  }, []);
+
   // 登出
   const handleLogout = async () => {
     await fetch('/api/auth', { method: 'DELETE' });
@@ -371,6 +391,7 @@ export default function DashboardPage() {
               setCurrentPortfolioId(portfolio.id);
               setCurrentPortfolioName(portfolio.name);
             }}
+            readOnly={!isAdmin}
           />
         </div>
         <div className="flex items-center gap-2">
@@ -432,7 +453,7 @@ export default function DashboardPage() {
               <Wallet className="w-4 h-4" />
               <span className="text-sm">現金 (TWD)</span>
             </div>
-            {!isEditingCash && (
+            {!isEditingCash && isAdmin && (
               <button
                 onClick={handleEditCash}
                 className="p-1 rounded hover:bg-border transition-colors text-muted"
@@ -561,13 +582,15 @@ export default function DashboardPage() {
       <div className="card">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold">持股清單</h2>
-          <button
-            onClick={() => setShowForm(true)}
-            className="btn-primary flex items-center gap-2"
-          >
-            <Plus className="w-4 h-4" />
-            <span className="hidden sm:inline">新增持股</span>
-          </button>
+          {isAdmin && (
+            <button
+              onClick={() => setShowForm(true)}
+              className="btn-primary flex items-center gap-2"
+            >
+              <Plus className="w-4 h-4" />
+              <span className="hidden sm:inline">新增持股</span>
+            </button>
+          )}
         </div>
 
         <HoldingList
@@ -579,6 +602,7 @@ export default function DashboardPage() {
             setShowForm(true);
           }}
           onDelete={handleDeleteClick}
+          readOnly={!isAdmin}
         />
       </div>
 

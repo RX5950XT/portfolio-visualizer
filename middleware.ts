@@ -16,9 +16,10 @@ export function middleware(request: NextRequest) {
     return NextResponse.next();
   }
   
-  // 檢查認證 Cookie
+  // 檢查認證 Cookie（支援舊版 'authenticated' 與新版 RBAC 角色）
   const authCookie = request.cookies.get('portfolio_auth');
-  const isAuthenticated = authCookie?.value === 'authenticated';
+  const cookieValue = authCookie?.value;
+  const isAuthenticated = cookieValue === 'admin' || cookieValue === 'guest' || cookieValue === 'authenticated';
   
   if (!isAuthenticated) {
     // API 請求回傳 401

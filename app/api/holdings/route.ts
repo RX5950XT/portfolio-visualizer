@@ -1,6 +1,16 @@
 import { NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase';
+import { getUserRole } from '@/lib/auth';
 import type { Holding } from '@/types';
+
+// 權限檢查輔助函式
+async function requireAdmin() {
+  const role = await getUserRole();
+  if (role !== 'admin') {
+    return NextResponse.json({ error: '無權限執行此操作' }, { status: 403 });
+  }
+  return null;
+}
 
 // GET: 取得指定投資組合的持股
 export async function GET(request: Request) {
@@ -36,6 +46,10 @@ export async function GET(request: Request) {
 // POST: 新增持股
 export async function POST(request: Request) {
   try {
+    // 權限檢查：只有管理員可以新增持股
+    const forbidden = await requireAdmin();
+    if (forbidden) return forbidden;
+
     const body = await request.json();
     const { symbol, shares, cost_price, purchase_date, portfolio_id } = body;
 

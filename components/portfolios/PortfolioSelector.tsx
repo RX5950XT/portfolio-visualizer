@@ -21,11 +21,13 @@ interface Portfolio {
 interface Props {
   currentPortfolioId: string | null;
   onSelectPortfolio: (portfolio: Portfolio) => void;
+  readOnly?: boolean; // 訪客模式，隱藏編輯功能
 }
 
 export default function PortfolioSelector({
   currentPortfolioId,
   onSelectPortfolio,
+  readOnly = false,
 }: Props) {
   const [portfolios, setPortfolios] = useState<Portfolio[]>([]);
   const [isOpen, setIsOpen] = useState(false);
@@ -236,31 +238,33 @@ export default function PortfolioSelector({
                     >
                       {portfolio.name}
                     </button>
-                    <div className="flex items-center gap-1">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setInputValue(portfolio.name);
-                          setEditingId(portfolio.id);
-                        }}
-                        className="p-1 rounded hover:bg-border transition-colors"
-                        title="重命名"
-                      >
-                        <Pencil className="w-3.5 h-3.5" />
-                      </button>
-                      {portfolios.length > 1 && (
+                    {!readOnly && (
+                      <div className="flex items-center gap-1">
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
-                            handleDelete(portfolio);
+                            setInputValue(portfolio.name);
+                            setEditingId(portfolio.id);
                           }}
-                          className="p-1 rounded hover:bg-danger/20 text-danger transition-colors"
-                          title="刪除"
+                          className="p-1 rounded hover:bg-border transition-colors"
+                          title="重命名"
                         >
-                          <Trash2 className="w-3.5 h-3.5" />
+                          <Pencil className="w-3.5 h-3.5" />
                         </button>
-                      )}
-                    </div>
+                        {portfolios.length > 1 && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDelete(portfolio);
+                            }}
+                            className="p-1 rounded hover:bg-danger/20 text-danger transition-colors"
+                            title="刪除"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </>
                 )}
               </div>
@@ -268,47 +272,49 @@ export default function PortfolioSelector({
           </div>
 
           {/* 新增組合 */}
-          <div className="border-t border-border p-2">
-            {isCreating ? (
-              <div className="flex items-center gap-2">
-                <input
-                  type="text"
-                  value={inputValue}
-                  onChange={(e) => setInputValue(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') handleCreate();
-                    if (e.key === 'Escape') setIsCreating(false);
+          {!readOnly && (
+            <div className="border-t border-border p-2">
+              {isCreating ? (
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={inputValue}
+                    onChange={(e) => setInputValue(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handleCreate();
+                      if (e.key === 'Escape') setIsCreating(false);
+                    }}
+                    placeholder="輸入組合名稱..."
+                    className="flex-1 px-2 py-1.5 rounded bg-background border border-border text-sm"
+                    autoFocus
+                  />
+                  <button
+                    onClick={handleCreate}
+                    className="p-1.5 rounded bg-primary hover:bg-primary/80 text-white"
+                  >
+                    <Check className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={() => setIsCreating(false)}
+                    className="p-1.5 rounded hover:bg-border"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => {
+                    setInputValue('');
+                    setIsCreating(true);
                   }}
-                  placeholder="輸入組合名稱..."
-                  className="flex-1 px-2 py-1.5 rounded bg-background border border-border text-sm"
-                  autoFocus
-                />
-                <button
-                  onClick={handleCreate}
-                  className="p-1.5 rounded bg-primary hover:bg-primary/80 text-white"
+                  className="flex items-center gap-2 w-full px-2 py-1.5 rounded hover:bg-border/50 text-primary transition-colors"
                 >
-                  <Check className="w-4 h-4" />
+                  <Plus className="w-4 h-4" />
+                  <span className="text-sm">新增投資組合</span>
                 </button>
-                <button
-                  onClick={() => setIsCreating(false)}
-                  className="p-1.5 rounded hover:bg-border"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-            ) : (
-              <button
-                onClick={() => {
-                  setInputValue('');
-                  setIsCreating(true);
-                }}
-                className="flex items-center gap-2 w-full px-2 py-1.5 rounded hover:bg-border/50 text-primary transition-colors"
-              >
-                <Plus className="w-4 h-4" />
-                <span className="text-sm">新增投資組合</span>
-              </button>
-            )}
-          </div>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>

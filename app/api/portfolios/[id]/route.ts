@@ -1,8 +1,18 @@
 import { NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase';
+import { getUserRole } from '@/lib/auth';
 
 interface RouteParams {
   params: Promise<{ id: string }>;
+}
+
+// 權限檢查輔助函式
+async function requireAdmin() {
+  const role = await getUserRole();
+  if (role !== 'admin') {
+    return NextResponse.json({ error: '無權限執行此操作' }, { status: 403 });
+  }
+  return null;
 }
 
 // GET: 取得單一投資組合
@@ -32,6 +42,10 @@ export async function GET(request: Request, { params }: RouteParams) {
 // PUT: 更新投資組合（重命名）
 export async function PUT(request: Request, { params }: RouteParams) {
   try {
+    // 權限檢查：只有管理員可以更新投資組合
+    const forbidden = await requireAdmin();
+    if (forbidden) return forbidden;
+
     const { id } = await params;
     const body = await request.json();
     const { name } = body;
@@ -64,6 +78,10 @@ export async function PUT(request: Request, { params }: RouteParams) {
 // DELETE: 刪除投資組合（同時刪除該組合下的所有持股和現金）
 export async function DELETE(request: Request, { params }: RouteParams) {
   try {
+    // 權限檢查：只有管理員可以刪除投資組合
+    const forbidden = await requireAdmin();
+    if (forbidden) return forbidden;
+
     const { id } = await params;
     const supabase = createServerClient();
 

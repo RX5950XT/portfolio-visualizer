@@ -1,5 +1,15 @@
 import { NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase';
+import { getUserRole } from '@/lib/auth';
+
+// 權限檢查輔助函式
+async function requireAdmin() {
+  const role = await getUserRole();
+  if (role !== 'admin') {
+    return NextResponse.json({ error: '無權限執行此操作' }, { status: 403 });
+  }
+  return null;
+}
 
 // GET: 取得所有投資組合
 export async function GET() {
@@ -39,6 +49,10 @@ export async function GET() {
 // POST: 建立新投資組合
 export async function POST(request: Request) {
   try {
+    // 權限檢查：只有管理員可以建立投資組合
+    const forbidden = await requireAdmin();
+    if (forbidden) return forbidden;
+
     const body = await request.json();
     const { name } = body;
 
