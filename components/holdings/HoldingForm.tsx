@@ -6,11 +6,12 @@ import type { Holding } from '@/types';
 
 interface Props {
   holding: Holding | null;
+  portfolioId?: string | null;
   onClose: () => void;
   onSuccess: () => void;
 }
 
-export default function HoldingForm({ holding, onClose, onSuccess }: Props) {
+export default function HoldingForm({ holding, portfolioId, onClose, onSuccess }: Props) {
   const [symbol, setSymbol] = useState('');
   const [shares, setShares] = useState('');
   const [costPrice, setCostPrice] = useState('');
@@ -34,12 +35,23 @@ export default function HoldingForm({ holding, onClose, onSuccess }: Props) {
     setError('');
     setLoading(true);
 
-    const body = {
+    const body: {
+      symbol: string;
+      shares: number;
+      cost_price: number;
+      purchase_date: string;
+      portfolio_id?: string;
+    } = {
       symbol: symbol.toUpperCase(),
       shares: parseFloat(shares),
       cost_price: parseFloat(costPrice),
       purchase_date: purchaseDate,
     };
+
+    // 新增時才加入 portfolio_id
+    if (!isEditing && portfolioId) {
+      body.portfolio_id = portfolioId;
+    }
 
     try {
       const url = isEditing ? `/api/holdings/${holding.id}` : '/api/holdings';

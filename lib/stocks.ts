@@ -77,14 +77,31 @@ export async function fetchMultipleQuotes(symbols: string[]): Promise<Map<string
   return results;
 }
 
-// 取得歷史股價
+// 取得歷史股價（支援自訂日期範圍）
 export async function fetchHistory(
   symbol: string,
-  range: '1mo' | '3mo' | '6mo' | '1y' | '5y' = '1mo'
+  options?: {
+    range?: '1mo' | '3mo' | '6mo' | '1y' | '5y' | 'max';
+    startDate?: string; // YYYY-MM-DD 格式
+    endDate?: string;   // YYYY-MM-DD 格式
+  }
 ): Promise<{ date: string; close: number }[]> {
   try {
-    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=${range}`;
-    
+    let url: string;
+
+    if (options?.startDate) {
+      // 使用自訂日期範圍（period1/period2 為 Unix 時間戳）
+      const period1 = Math.floor(new Date(options.startDate).getTime() / 1000);
+      const period2 = options?.endDate
+        ? Math.floor(new Date(options.endDate).getTime() / 1000)
+        : Math.floor(Date.now() / 1000);
+      url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&period1=${period1}&period2=${period2}`;
+    } else {
+      // 使用預設範圍
+      const range = options?.range || '1mo';
+      url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=${range}`;
+    }
+
     const res = await fetch(url, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
@@ -98,14 +115,14 @@ export async function fetchHistory(
 
     const data = await res.json();
     const result = data.chart?.result?.[0];
-    
+
     if (!result) {
       return [];
     }
 
     const timestamps = result.timestamp || [];
     const closes = result.indicators?.quote?.[0]?.close || [];
-    
+
     return timestamps.map((ts: number, i: number) => ({
       date: new Date(ts * 1000).toISOString().split('T')[0],
       close: closes[i],

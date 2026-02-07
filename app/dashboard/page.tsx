@@ -19,7 +19,10 @@ import type { Holding, HoldingWithQuote } from '@/types';
 import HoldingForm from '@/components/holdings/HoldingForm';
 import HoldingList from '@/components/holdings/HoldingList';
 import PortfolioPieChart from '@/components/charts/PieChart';
+import AssetTrendChart from '@/components/charts/AssetTrendChart';
+import DailyPnLChart from '@/components/charts/DailyPnLChart';
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
+import PortfolioSelector from '@/components/portfolios/PortfolioSelector';
 
 // 股價快取（避免重複請求）
 const quoteCache = new Map<
@@ -54,10 +57,20 @@ export default function DashboardPage() {
   const [isEditingCash, setIsEditingCash] = useState(false);
   const [cashInput, setCashInput] = useState('');
 
+  // 投資組合狀態
+  const [currentPortfolioId, setCurrentPortfolioId] = useState<string | null>(null);
+  const [currentPortfolioName, setCurrentPortfolioName] = useState<string>('新的投資組合');
+
+  // 圖表刷新 key（變化時觸發圖表重新載入）
+  const [chartRefreshKey, setChartRefreshKey] = useState<number>(0);
+
   // 載入持股資料
   const loadHoldings = useCallback(async () => {
     try {
-      const res = await fetch('/api/holdings');
+      const url = currentPortfolioId
+        ? `/api/holdings?portfolio_id=${currentPortfolioId}`
+        : '/api/holdings';
+      const res = await fetch(url);
       const { data, error } = await res.json();
       if (error) throw new Error(error);
       return data as Holding[];
@@ -65,7 +78,7 @@ export default function DashboardPage() {
       console.error('載入持股失敗:', err);
       return [];
     }
-  }, []);
+  }, [currentPortfolioId]);
 
   // 取得單一股票報價（帶快取）
   const fetchSingleQuote = useCallback(
@@ -124,13 +137,16 @@ export default function DashboardPage() {
   // 取得現金餘額
   const loadCashBalance = useCallback(async () => {
     try {
-      const res = await fetch('/api/cash');
+      const url = currentPortfolioId
+        ? `/api/cash?portfolio_id=${currentPortfolioId}`
+        : '/api/cash';
+      const res = await fetch(url);
       const { data } = await res.json();
       return data?.amount_twd || 0;
     } catch {
       return 0;
     }
-  }, []);
+  }, [currentPortfolioId]);
 
   // 更新現金餘額
   const updateCashBalance = async (amount: number) => {
@@ -138,7 +154,10 @@ export default function DashboardPage() {
       const res = await fetch('/api/cash', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ amount_twd: amount }),
+        body: JSON.stringify({
+          amount_twd: amount,
+          portfolio_id: currentPortfolioId,
+        }),
       });
       const { data, error } = await res.json();
       if (error) throw new Error(error);
@@ -240,6 +259,9 @@ export default function DashboardPage() {
 
     setLoading(false);
     setRefreshing(false);
+
+    // 觸發圖表重新載入
+    setChartRefreshKey(prev => prev + 1);
   }, [loadHoldings, fetchExchangeRate, fetchSingleQuote, fetchExpenseRatio, loadCashBalance]);
 
   useEffect(() => {
@@ -343,6 +365,13 @@ export default function DashboardPage() {
         <div className="flex items-center gap-3">
           <TrendingUp className="w-8 h-8 text-primary" />
           <h1 className="text-xl md:text-2xl font-bold">Portfolio Visualizer</h1>
+          <PortfolioSelector
+            currentPortfolioId={currentPortfolioId}
+            onSelectPortfolio={(portfolio) => {
+              setCurrentPortfolioId(portfolio.id);
+              setCurrentPortfolioName(portfolio.name);
+            }}
+          />
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -443,13 +472,48 @@ export default function DashboardPage() {
           )}
         </div>
 
-        {/* 持股數量 */}
+        {/* 持股分佈 */}
         <div className="card">
           <div className="flex items-center gap-2 text-muted mb-2">
             <PieChartIcon className="w-4 h-4" />
-            <span className="text-sm">持股數量</span>
+            <span className="text-sm">持股分佈</span>
           </div>
-          <p className="text-2xl font-bold">{holdings.length}</p>
+          <div className="space-y-2">
+            {/* 持股檔數 */}
+            <p className="text-lg font-bold">
+              台股 {holdings.filter(h => h.market === 'TW').length} 檔 / 美股 {holdings.filter(h => h.market === 'US').length} 檔
+            </p>
+            {/* 權重分佈 */}
+            <div className="text-sm space-y-1">
+              {(() => {
+                const twValue = holdings
+                  .filter(h => h.market === 'TW')
+                  .reduce((sum, h) => sum + (h.currentValue || 0), 0);
+                const usValue = holdings
+                  .filter(h => h.market === 'US')
+                  .reduce((sum, h) => sum + (h.currentValue || 0), 0);
+                const twWeight = totalValueTWD > 0 ? (twValue / totalValueTWD * 100) : 0;
+                const usWeight = totalValueTWD > 0 ? (usValue / totalValueTWD * 100) : 0;
+                const cashWeight = totalValueTWD > 0 ? (cashBalance / totalValueTWD * 100) : 0;
+                return (
+                  <>
+                    <div className="flex justify-between">
+                      <span className="text-muted">台股</span>
+                      <span>{twWeight.toFixed(1)}%</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted">美股</span>
+                      <span>{usWeight.toFixed(1)}%</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted">現金</span>
+                      <span>{cashWeight.toFixed(1)}%</span>
+                    </div>
+                  </>
+                );
+              })()}
+            </div>
+          </div>
         </div>
 
         {/* ETF 加權費用率 */}
@@ -483,17 +547,13 @@ export default function DashboardPage() {
         {/* 總資產走勢圖 */}
         <div className="card">
           <h2 className="text-lg font-semibold mb-4">總資產走勢</h2>
-          <div className="h-64 flex items-center justify-center text-muted">
-            累積快照數據後將顯示走勢圖
-          </div>
+          <AssetTrendChart portfolioId={currentPortfolioId} refreshKey={chartRefreshKey} />
         </div>
 
         {/* 損益走勢圖 */}
         <div className="card">
           <h2 className="text-lg font-semibold mb-4">損益走勢 (近 7 天)</h2>
-          <div className="h-64 flex items-center justify-center text-muted">
-            累積快照數據後將顯示走勢圖
-          </div>
+          <DailyPnLChart portfolioId={currentPortfolioId} refreshKey={chartRefreshKey} />
         </div>
       </div>
 
@@ -513,6 +573,7 @@ export default function DashboardPage() {
         <HoldingList
           holdings={holdings}
           exchangeRate={exchangeRate}
+          totalValue={totalValueTWD}
           onEdit={(h) => {
             setEditingHolding(h);
             setShowForm(true);
@@ -525,6 +586,7 @@ export default function DashboardPage() {
       {showForm && (
         <HoldingForm
           holding={editingHolding}
+          portfolioId={currentPortfolioId}
           onClose={() => {
             setShowForm(false);
             setEditingHolding(null);

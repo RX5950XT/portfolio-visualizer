@@ -2,14 +2,21 @@ import { NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase';
 
 // GET: 取得現金餘額
-export async function GET() {
+export async function GET(request: Request) {
   try {
+    const { searchParams } = new URL(request.url);
+    const portfolioId = searchParams.get('portfolio_id');
+
     const supabase = createServerClient();
 
-    const { data, error } = await supabase
-      .from('cash_balance')
-      .select('*')
-      .single();
+    let query = supabase.from('cash_balance').select('*');
+
+    // 如果指定了投資組合，過濾現金
+    if (portfolioId) {
+      query = query.eq('portfolio_id', portfolioId);
+    }
+
+    const { data, error } = await query.single();
 
     if (error) {
       // 如果表格不存在或沒有資料，回傳預設值
@@ -31,7 +38,7 @@ export async function GET() {
 export async function PUT(request: Request) {
   try {
     const body = await request.json();
-    const { amount_twd } = body;
+    const { amount_twd, portfolio_id } = body;
 
     if (typeof amount_twd !== 'number' || isNaN(amount_twd)) {
       return NextResponse.json({ error: '金額格式錯誤' }, { status: 400 });
@@ -39,14 +46,15 @@ export async function PUT(request: Request) {
 
     const supabase = createServerClient();
 
-    // 先嘗試更新
-    const { data: existingData, error: selectError } = await supabase
-      .from('cash_balance')
-      .select('id')
-      .single();
+    // 先嘗試查詢現有記錄
+    let query = supabase.from('cash_balance').select('id');
+    if (portfolio_id) {
+      query = query.eq('portfolio_id', portfolio_id);
+    }
+
+    const { data: existingData, error: selectError } = await query.single();
 
     if (selectError && selectError.code !== 'PGRST116') {
-      // 表格可能不存在，嘗試建立
       console.error('查詢現金餘額失敗:', selectError);
     }
 
@@ -64,9 +72,14 @@ export async function PUT(request: Request) {
         .single();
     } else {
       // 新增記錄
+      const insertData: { amount_twd: number; portfolio_id?: string } = { amount_twd };
+      if (portfolio_id) {
+        insertData.portfolio_id = portfolio_id;
+      }
+
       result = await supabase
         .from('cash_balance')
-        .insert({ amount_twd })
+        .insert(insertData)
         .select()
         .single();
     }

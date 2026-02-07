@@ -1,0 +1,92 @@
+import { NextResponse } from 'next/server';
+import { createServerClient } from '@/lib/supabase';
+
+interface RouteParams {
+  params: Promise<{ id: string }>;
+}
+
+// GET: 取得單一投資組合
+export async function GET(request: Request, { params }: RouteParams) {
+  try {
+    const { id } = await params;
+    const supabase = createServerClient();
+
+    const { data, error } = await supabase
+      .from('portfolios')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (error) {
+      console.error('取得投資組合失敗:', error);
+      return NextResponse.json({ error: '找不到投資組合' }, { status: 404 });
+    }
+
+    return NextResponse.json({ data });
+  } catch (err) {
+    console.error('取得投資組合錯誤:', err);
+    return NextResponse.json({ error: '伺服器錯誤' }, { status: 500 });
+  }
+}
+
+// PUT: 更新投資組合（重命名）
+export async function PUT(request: Request, { params }: RouteParams) {
+  try {
+    const { id } = await params;
+    const body = await request.json();
+    const { name } = body;
+
+    if (!name || typeof name !== 'string') {
+      return NextResponse.json({ error: '請提供組合名稱' }, { status: 400 });
+    }
+
+    const supabase = createServerClient();
+
+    const { data, error } = await supabase
+      .from('portfolios')
+      .update({ name: name.trim() })
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) {
+      console.error('更新投資組合失敗:', error);
+      return NextResponse.json({ error: '更新投資組合失敗' }, { status: 500 });
+    }
+
+    return NextResponse.json({ data });
+  } catch (err) {
+    console.error('更新投資組合錯誤:', err);
+    return NextResponse.json({ error: '伺服器錯誤' }, { status: 500 });
+  }
+}
+
+// DELETE: 刪除投資組合（同時刪除該組合下的所有持股和現金）
+export async function DELETE(request: Request, { params }: RouteParams) {
+  try {
+    const { id } = await params;
+    const supabase = createServerClient();
+
+    // 先刪除該組合下的所有持股
+    await supabase.from('holdings').delete().eq('portfolio_id', id);
+
+    // 刪除該組合的現金餘額
+    await supabase.from('cash_balance').delete().eq('portfolio_id', id);
+
+    // 刪除投資組合本身
+    const { error } = await supabase
+      .from('portfolios')
+      .delete()
+      .eq('id', id);
+
+    if (error) {
+      console.error('刪除投資組合失敗:', error);
+      return NextResponse.json({ error: '刪除投資組合失敗' }, { status: 500 });
+    }
+
+    return NextResponse.json({ success: true });
+  } catch (err) {
+    console.error('刪除投資組合錯誤:', err);
+    return NextResponse.json({ error: '伺服器錯誤' }, { status: 500 });
+  }
+}
