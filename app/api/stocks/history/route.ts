@@ -11,7 +11,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: '請提供股票代號' }, { status: 400 });
   }
 
-  const history = await fetchHistory(symbol.toUpperCase(), range || '1mo');
+  const history = await fetchHistory(symbol.toUpperCase(), { range: range || '1mo' });
   
   if (history.length === 0) {
     return NextResponse.json({ error: '無法取得歷史數據' }, { status: 404 });

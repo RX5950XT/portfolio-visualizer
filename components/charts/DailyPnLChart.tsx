@@ -10,6 +10,7 @@ import {
   Tooltip,
   ResponsiveContainer,
   Cell,
+  Brush,
 } from 'recharts';
 import { RefreshCw } from 'lucide-react';
 
@@ -35,7 +36,7 @@ export default function DailyPnLChart({ portfolioId, refreshKey }: Props) {
     try {
       // 使用 timestamp 避免瀏覽器快取
       const timestamp = Date.now();
-      let url = `/api/charts/daily-pnl?days=7&_t=${timestamp}`;
+      let url = `/api/charts/daily-pnl?days=30&_t=${timestamp}`;
       if (portfolioId) {
         url += `&portfolio_id=${portfolioId}`;
       }
@@ -160,6 +161,15 @@ export default function DailyPnLChart({ portfolioId, refreshKey }: Props) {
               />
             ))}
           </Bar>
+          {/* 縮放/拖動範圍選擇器，預設顯示最近 7 天 */}
+          <Brush
+            dataKey="date"
+            height={30}
+            stroke="#666"
+            fill="#1a1a1a"
+            tickFormatter={formatDate}
+            startIndex={Math.max(0, data.length - 7)}
+          />
         </BarChart>
       </ResponsiveContainer>
     </div>

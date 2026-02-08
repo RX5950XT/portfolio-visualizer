@@ -36,18 +36,27 @@ async function fetchETFExpenseRatio(symbol: string): Promise<number | null> {
 
 // 常見 ETF 費用率備用資料（手動維護）
 const FALLBACK_EXPENSE_RATIOS: Record<string, number> = {
-  // 美股 ETF
+  // 美股 ETF - Vanguard
   'VOO': 0.0003,
   'VTI': 0.0003,
-  'SPY': 0.0009,
-  'QQQ': 0.0020,
-  'IVV': 0.0003,
   'VT': 0.0007,
   'VXUS': 0.0007,
-  'BND': 0.0003,
-  'VNQ': 0.0012,
+  'VEU': 0.0007,   // Vanguard FTSE All-World ex-US
   'VGT': 0.0010,
+  'VNQ': 0.0012,
+  'BND': 0.0003,
+  // 美股 ETF - iShares
+  'IVV': 0.0003,
+  'IJH': 0.0005,   // iShares Core S&P Mid-Cap
+  'EWY': 0.0059,   // iShares MSCI South Korea
+  'SOXX': 0.0035,  // iShares Semiconductor
+  // 美股 ETF - SPDR / State Street
+  'SPY': 0.0009,
+  'XLP': 0.0009,   // Consumer Staples Select Sector SPDR
+  // 美股 ETF - 其他
+  'QQQ': 0.0020,
   'ARKK': 0.0075,
+  'NLR': 0.0060,   // VanEck Uranium+Nuclear Energy
   // 台股 ETF（常見）
   '0050.TW': 0.0043,
   '0056.TW': 0.0066,

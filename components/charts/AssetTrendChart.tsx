@@ -9,6 +9,7 @@ import {
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
+  Brush,
 } from 'recharts';
 import { RefreshCw } from 'lucide-react';
 
@@ -161,6 +162,14 @@ export default function AssetTrendChart({ portfolioId, refreshKey }: Props) {
             strokeWidth={2}
             dot={false}
             activeDot={{ r: 4, fill: '#3b82f6' }}
+          />
+          {/* 縮放/拖動範圍選擇器 */}
+          <Brush
+            dataKey="date"
+            height={30}
+            stroke="#3b82f6"
+            fill="#1a1a1a"
+            tickFormatter={formatDate}
           />
         </LineChart>
       </ResponsiveContainer>
