@@ -145,20 +145,20 @@ export default function AssetTrendChart({ portfolioId, refreshKey }: Props) {
   const yMax = Math.ceil((maxValue + padding) / 10000) * 10000;
 
   return (
-    <div className="h-64">
+    <div className="h-full">
       <ResponsiveContainer width="100%" height="100%">
         <LineChart
           data={data}
           margin={{ top: 5, right: 20, left: 10, bottom: 5 }}
         >
-          <CartesianGrid strokeDasharray="3 3" stroke="#333" />
+          <CartesianGrid strokeDasharray="3 3" stroke="#333" vertical={false} />
           <XAxis
             dataKey="date"
             tickFormatter={formatDate}
             stroke="#666"
             fontSize={12}
             tickLine={false}
-            interval="preserveStartEnd"
+            interval={Math.floor(data.length / 6)}
           />
           <YAxis
             tickFormatter={formatCurrency}
@@ -167,6 +167,7 @@ export default function AssetTrendChart({ portfolioId, refreshKey }: Props) {
             tickLine={false}
             axisLine={false}
             domain={[yMin, yMax]}
+            tickCount={5}
           />
           <Tooltip content={<CustomTooltip />} />
           <Legend

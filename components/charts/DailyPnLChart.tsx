@@ -128,19 +128,20 @@ export default function DailyPnLChart({ portfolioId, refreshKey }: Props) {
   const yRange = Math.ceil(maxAbs / 1000) * 1000 || 1000;
 
   return (
-    <div className="h-64">
+    <div className="h-full">
       <ResponsiveContainer width="100%" height="100%">
         <BarChart
           data={data}
           margin={{ top: 5, right: 20, left: 10, bottom: 5 }}
         >
-          <CartesianGrid strokeDasharray="3 3" stroke="#333" />
+          <CartesianGrid strokeDasharray="3 3" stroke="#333" vertical={false} />
           <XAxis
             dataKey="date"
             tickFormatter={formatDate}
             stroke="#666"
             fontSize={12}
             tickLine={false}
+            interval={4}
           />
           <YAxis
             tickFormatter={formatCurrency}
@@ -149,6 +150,7 @@ export default function DailyPnLChart({ portfolioId, refreshKey }: Props) {
             tickLine={false}
             axisLine={false}
             domain={[-yRange, yRange]}
+            tickCount={5}
           />
           <Tooltip content={<CustomTooltip />} />
           <Bar

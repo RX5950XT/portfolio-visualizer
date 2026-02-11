@@ -49,7 +49,8 @@ export async function GET(request: Request) {
     // 計算查詢的日期範圍（多抓一天用於計算差值）
     const endDate = new Date();
     const startDate = new Date();
-    startDate.setDate(startDate.getDate() - days - 1);
+    // 多抓 2.5 倍日曆天，確保涵蓋足夠交易日（排除週末、假日）
+    startDate.setDate(startDate.getDate() - Math.ceil(days * 2.5));
 
     // 取得所有持股的歷史股價
     const historyMap = new Map<string, { date: string; close: number }[]>();
@@ -66,7 +67,8 @@ export async function GET(request: Request) {
 
     // 產生日期序列（最近 N 天）
     const dateList: string[] = [];
-    for (let i = days; i >= 0; i--) {
+    const calendarDays = Math.ceil(days * 2.5);
+    for (let i = calendarDays; i >= 0; i--) {
       const d = new Date();
       d.setDate(d.getDate() - i);
       dateList.push(d.toISOString().split('T')[0]);
@@ -120,7 +122,8 @@ export async function GET(request: Request) {
       }
     }
 
-    return NextResponse.json({ data: pnlData });
+    // 只回傳最近 N 個交易日
+    return NextResponse.json({ data: pnlData.slice(-days) });
   } catch (err) {
     console.error('計算每日損益失敗:', err);
     return NextResponse.json({ error: '伺服器錯誤' }, { status: 500 });

@@ -10,7 +10,6 @@ import {
   DollarSign,
   Percent,
   PieChart as PieChartIcon,
-  Wallet,
   Edit2,
   Check,
   X,
@@ -301,7 +300,7 @@ export default function DashboardPage() {
       totalCost > 0 ? ((totalValue - totalCost) / totalCost) * 100 : 0,
     );
     setWeightedExpenseRatio(
-      etfTotalValue > 0 ? etfWeightedSum / etfTotalValue : null,
+      totalValue > 0 && etfWeightedSum > 0 ? etfWeightedSum / totalValue : null,
     );
 
     setLoading(false);
@@ -471,151 +470,160 @@ export default function DashboardPage() {
         </div>
       </header>
 
-      {/* 總覽卡片 */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
-        {/* 總資產 */}
-        <div className="card">
-          <div className="flex items-center gap-2 text-muted mb-2">
-            <DollarSign className="w-4 h-4" />
-            <span className="text-sm">總資產</span>
-          </div>
-          <p className="text-2xl font-bold">{formatCurrency(totalValueTWD)}</p>
-          <p className="text-xs text-muted mt-1">
-            成本: {formatCurrency(totalCostTWD)} | 匯率:{" "}
-            {exchangeRate.toFixed(2)}
-          </p>
-        </div>
-
-        {/* 總損益 */}
-        <div className="card">
-          <div className="flex items-center gap-2 text-muted mb-2">
-            <TrendingUp className="w-4 h-4" />
-            <span className="text-sm">總損益</span>
-          </div>
-          <p
-            className={`text-2xl font-bold ${totalGain >= 0 ? "text-up" : "text-down"}`}
-          >
-            {totalGain >= 0 ? "+" : ""}
-            {formatCurrency(totalGain)}
-          </p>
-          <p className={`text-sm ${totalGain >= 0 ? "text-up" : "text-down"}`}>
-            {totalGainPercent >= 0 ? "+" : ""}
-            {totalGainPercent.toFixed(2)}%
-          </p>
-        </div>
-
-        {/* 現金餘額 */}
-        <div className="card">
-          <div className="flex items-center justify-between mb-2">
-            <div className="flex items-center gap-2 text-muted">
-              <Wallet className="w-4 h-4" />
-              <span className="text-sm">現金 (TWD)</span>
+      {/* 上方：左側 2×2 卡片 + 右側資產配置 */}
+      <div className="grid grid-cols-1 lg:grid-cols-[2fr_3fr] gap-4 mb-6">
+        {/* 左側 2×2 小卡片 */}
+        <div className="grid grid-cols-2 gap-4">
+          {/* 總資產 */}
+          <div className="card">
+            <div className="flex items-center gap-2 text-muted mb-2">
+              <DollarSign className="w-4 h-4" />
+              <span className="text-sm">總資產</span>
             </div>
-            {!isEditingCash && isAdmin && (
-              <button
-                onClick={handleEditCash}
-                className="p-1 rounded hover:bg-border transition-colors text-muted"
-                title="編輯現金"
-              >
-                <Edit2 className="w-3 h-3" />
-              </button>
-            )}
-          </div>
-          {isEditingCash ? (
-            <div className="flex items-center gap-2">
-              <input
-                type="number"
-                value={cashInput}
-                onChange={(e) => setCashInput(e.target.value)}
-                className="w-full px-2 py-1 bg-background border border-border rounded text-lg"
-                placeholder="0"
-                autoFocus
-              />
-              <button
-                onClick={handleSaveCash}
-                className="p-1.5 rounded bg-up text-white hover:bg-up/80"
-                title="儲存"
-              >
-                <Check className="w-4 h-4" />
-              </button>
-              <button
-                onClick={handleCancelCash}
-                className="p-1.5 rounded bg-border hover:bg-border/80"
-                title="取消"
-              >
-                <X className="w-4 h-4" />
-              </button>
+            <p className="text-2xl font-bold">{formatCurrency(totalValueTWD)}</p>
+            <div className="mt-2 space-y-1 text-sm">
+              <div className="flex items-center justify-between text-muted">
+                <span className="font-medium">股票</span>
+                <span>
+                  {formatCurrency(totalValueTWD - cashBalance)}
+                  {totalValueTWD > 0 && (
+                    <span className="ml-1 text-xs">
+                      ({(((totalValueTWD - cashBalance) / totalValueTWD) * 100).toFixed(1)}%)
+                    </span>
+                  )}
+                </span>
+              </div>
+              <div className="flex items-center justify-between text-muted">
+                <span className="flex items-center gap-1 font-medium">
+                  現金
+                  {!isEditingCash && isAdmin && (
+                    <button
+                      onClick={handleEditCash}
+                      className="p-0.5 rounded hover:bg-border transition-colors"
+                      title="編輯現金"
+                    >
+                      <Edit2 className="w-3 h-3" />
+                    </button>
+                  )}
+                </span>
+                {isEditingCash ? (
+                  <div className="flex items-center gap-1">
+                    <input
+                      type="number"
+                      value={cashInput}
+                      onChange={(e) => setCashInput(e.target.value)}
+                      className="w-24 px-1.5 py-0.5 bg-background border border-border rounded text-sm text-right"
+                      placeholder="0"
+                      autoFocus
+                    />
+                    <button
+                      onClick={handleSaveCash}
+                      className="p-1 rounded bg-up text-white hover:bg-up/80"
+                      title="儲存"
+                    >
+                      <Check className="w-3 h-3" />
+                    </button>
+                    <button
+                      onClick={handleCancelCash}
+                      className="p-1 rounded bg-border hover:bg-border/80"
+                      title="取消"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                ) : (
+                  <span>
+                    {formatCurrency(cashBalance)}
+                    {totalValueTWD > 0 && (
+                      <span className="ml-1 text-xs">
+                        ({((cashBalance / totalValueTWD) * 100).toFixed(1)}%)
+                      </span>
+                    )}
+                  </span>
+                )}
+              </div>
             </div>
-          ) : (
-            <p className="text-2xl font-bold">{formatCurrency(cashBalance)}</p>
-          )}
-        </div>
-
-        {/* 持股分佈 */}
-        <div className="card">
-          <div className="flex items-center gap-2 text-muted mb-2">
-            <PieChartIcon className="w-4 h-4" />
-            <span className="text-sm">持股分佈</span>
           </div>
-          <div className="space-y-2">
-            {/* 持股檔數（用聚合後的計數） */}
-            <p className="text-lg font-bold">
-              台股 {aggregatedHoldings.filter((h) => h.market === "TW").length} 檔 / 美股{" "}
-              {aggregatedHoldings.filter((h) => h.market === "US").length} 檔
+
+          {/* 持股分佈 */}
+          <div className="card">
+            <div className="flex items-center gap-2 text-muted mb-2">
+              <PieChartIcon className="w-4 h-4" />
+              <span className="text-sm">持股分佈</span>
+            </div>
+            <div className="space-y-2">
+              <p className="text-lg font-bold">
+                台股 {aggregatedHoldings.filter((h) => h.market === "TW").length} 檔 / 美股{" "}
+                {aggregatedHoldings.filter((h) => h.market === "US").length} 檔
+              </p>
+              <div className="text-sm space-y-1">
+                {(() => {
+                  const twValue = aggregatedHoldings
+                    .filter((h) => h.market === "TW")
+                    .reduce((sum, h) => sum + (h.currentValue || 0), 0);
+                  const usValue = aggregatedHoldings
+                    .filter((h) => h.market === "US")
+                    .reduce((sum, h) => sum + (h.currentValue || 0), 0);
+                  const twWeight =
+                    totalValueTWD > 0 ? (twValue / totalValueTWD) * 100 : 0;
+                  const usWeight =
+                    totalValueTWD > 0 ? (usValue / totalValueTWD) * 100 : 0;
+                  const cashWeight =
+                    totalValueTWD > 0 ? (cashBalance / totalValueTWD) * 100 : 0;
+                  return (
+                    <>
+                      <div className="flex justify-between">
+                        <span className="text-muted font-medium">台股</span>
+                        <span className="font-medium">{twWeight.toFixed(1)}%</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted font-medium">美股</span>
+                        <span className="font-medium">{usWeight.toFixed(1)}%</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted font-medium">現金</span>
+                        <span className="font-medium">{cashWeight.toFixed(1)}%</span>
+                      </div>
+                    </>
+                  );
+                })()}
+              </div>
+            </div>
+          </div>
+
+          {/* 總損益 */}
+          <div className="card">
+            <div className="flex items-center gap-2 text-muted mb-2">
+              <TrendingUp className="w-4 h-4" />
+              <span className="text-sm">總損益</span>
+            </div>
+            <p
+              className={`text-2xl font-bold ${totalGain >= 0 ? "text-up" : "text-down"}`}
+            >
+              {totalGain >= 0 ? "+" : ""}
+              {formatCurrency(totalGain)}
             </p>
-            {/* 權重分佈 */}
-            <div className="text-sm space-y-1">
-              {(() => {
-                const twValue = aggregatedHoldings
-                  .filter((h) => h.market === "TW")
-                  .reduce((sum, h) => sum + (h.currentValue || 0), 0);
-                const usValue = aggregatedHoldings
-                  .filter((h) => h.market === "US")
-                  .reduce((sum, h) => sum + (h.currentValue || 0), 0);
-                const twWeight =
-                  totalValueTWD > 0 ? (twValue / totalValueTWD) * 100 : 0;
-                const usWeight =
-                  totalValueTWD > 0 ? (usValue / totalValueTWD) * 100 : 0;
-                const cashWeight =
-                  totalValueTWD > 0 ? (cashBalance / totalValueTWD) * 100 : 0;
-                return (
-                  <>
-                    <div className="flex justify-between">
-                      <span className="text-muted">台股</span>
-                      <span>{twWeight.toFixed(1)}%</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-muted">美股</span>
-                      <span>{usWeight.toFixed(1)}%</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-muted">現金</span>
-                      <span>{cashWeight.toFixed(1)}%</span>
-                    </div>
-                  </>
-                );
-              })()}
+            <p className={`text-sm ${totalGain >= 0 ? "text-up" : "text-down"}`}>
+              {totalGainPercent >= 0 ? "+" : ""}
+              {totalGainPercent.toFixed(2)}%
+            </p>
+          </div>
+
+          {/* ETF 加權費用率 */}
+          <div className="card">
+            <div className="flex items-center gap-2 text-muted mb-2">
+              <Percent className="w-4 h-4" />
+              <span className="text-sm">ETF 加權費用率</span>
             </div>
+            <p className="text-2xl font-bold">
+              {weightedExpenseRatio !== null
+                ? `${(weightedExpenseRatio * 100).toFixed(3)}%`
+                : "—"}
+            </p>
           </div>
         </div>
 
-        {/* ETF 加權費用率 */}
-        <div className="card">
-          <div className="flex items-center gap-2 text-muted mb-2">
-            <Percent className="w-4 h-4" />
-            <span className="text-sm">ETF 加權費用率</span>
-          </div>
-          <p className="text-2xl font-bold">
-            {weightedExpenseRatio !== null
-              ? `${(weightedExpenseRatio * 100).toFixed(3)}%`
-              : "—"}
-          </p>
-        </div>
-      </div>
-
-      {/* 圖表區 - 3 欄 */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
-        {/* 資產配置圓餅圖 */}
+        {/* 右側資產配置圓餅圖 */}
         <div className="card">
           <h2 className="text-lg font-semibold mb-4">資產配置</h2>
           {pieChartData.length > 0 && pieChartData.some((d) => d.value > 0) ? (
@@ -626,23 +634,30 @@ export default function DashboardPage() {
             </div>
           )}
         </div>
+      </div>
 
+      {/* 下方圖表：2 欄 */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
         {/* 總資產走勢圖 */}
         <div className="card">
           <h2 className="text-lg font-semibold mb-4">總資產走勢</h2>
-          <AssetTrendChart
-            portfolioId={currentPortfolioId}
-            refreshKey={chartRefreshKey}
-          />
+          <div className="h-[350px]">
+            <AssetTrendChart
+              portfolioId={currentPortfolioId}
+              refreshKey={chartRefreshKey}
+            />
+          </div>
         </div>
 
         {/* 每日損益變化圖 */}
         <div className="card">
           <h2 className="text-lg font-semibold mb-4">每日損益變化</h2>
-          <DailyPnLChart
-            portfolioId={currentPortfolioId}
-            refreshKey={chartRefreshKey}
-          />
+          <div className="h-[350px]">
+            <DailyPnLChart
+              portfolioId={currentPortfolioId}
+              refreshKey={chartRefreshKey}
+            />
+          </div>
         </div>
       </div>
 
