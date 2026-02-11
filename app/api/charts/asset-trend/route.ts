@@ -14,9 +14,10 @@ interface Holding {
 interface ChartDataPoint {
   date: string;
   value: number;
+  cost: number;
 }
 
-// GET: 取得資產走勢資料
+// GET: 取得資產走勢資料（市值線 + 成本線）
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
@@ -24,7 +25,6 @@ export async function GET(request: Request) {
 
     const supabase = createServerClient();
 
-    // 取得持股（可過濾投資組合）
     let query = supabase
       .from('holdings')
       .select('*')
@@ -45,7 +45,6 @@ export async function GET(request: Request) {
       return NextResponse.json({ data: [] });
     }
 
-    // 取得當前匯率
     const exchangeRate = (await fetchExchangeRate()) || 32;
 
     // 找出最早的買入日期
@@ -70,7 +69,7 @@ export async function GET(request: Request) {
       })
     );
 
-    // 產生日期序列（從最早買入日到今天）
+    // 產生日期序列
     const startDate = new Date(earliestDate);
     const endDate = new Date();
     const dateList: string[] = [];
@@ -80,23 +79,32 @@ export async function GET(request: Request) {
       dateList.push(dateStr);
     }
 
-    // 計算每日總資產價值
+    // 計算每日市值 + 成本
     const chartData: ChartDataPoint[] = [];
     let lastKnownPrices: Map<string, number> = new Map();
 
     for (const date of dateList) {
-      let dailyTotal = 0;
+      let dailyValue = 0;
+      let dailyCost = 0;
+      let hasAnyHolding = false;
 
       for (const holding of holdings as Holding[]) {
         // 只計算已買入的持股
-        if (holding.purchase_date > date) {
-          continue;
-        }
+        if (holding.purchase_date > date) continue;
 
+        hasAnyHolding = true;
+
+        // 成本線：該 lot 的買入總成本（TWD）
+        const shares = Number(holding.shares);
+        const costPerShare = Number(holding.cost_price);
+        const lotCost = shares * costPerShare;
+        const isUS = holding.market === 'US';
+        dailyCost += isUS ? lotCost * exchangeRate : lotCost;
+
+        // 市值線：當日收盤價 × 股數（TWD）
         const priceMap = historyMap.get(holding.symbol);
         let price = priceMap?.get(date);
 
-        // 如果當天沒有價格（例如週末），使用最近一天的價格
         if (!price) {
           price = lastKnownPrices.get(holding.symbol);
         } else {
@@ -104,23 +112,16 @@ export async function GET(request: Request) {
         }
 
         if (price) {
-          const shares = Number(holding.shares);
           const value = shares * price;
-
-          // 美股轉換為 TWD
-          if (holding.market === 'US') {
-            dailyTotal += value * exchangeRate;
-          } else {
-            dailyTotal += value;
-          }
+          dailyValue += isUS ? value * exchangeRate : value;
         }
       }
 
-      // 只加入有價值的日期（跳過資料開始前的日期）
-      if (dailyTotal > 0) {
+      if (hasAnyHolding && dailyValue > 0) {
         chartData.push({
           date,
-          value: Math.round(dailyTotal),
+          value: Math.round(dailyValue),
+          cost: Math.round(dailyCost),
         });
       }
     }

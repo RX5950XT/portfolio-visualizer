@@ -9,8 +9,6 @@ import {
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
-  Cell,
-  Brush,
 } from 'recharts';
 import { RefreshCw } from 'lucide-react';
 
@@ -153,23 +151,33 @@ export default function DailyPnLChart({ portfolioId, refreshKey }: Props) {
             domain={[-yRange, yRange]}
           />
           <Tooltip content={<CustomTooltip />} />
-          <Bar dataKey="pnl" radius={[4, 4, 0, 0]}>
-            {data.map((entry, index) => (
-              <Cell
-                key={`cell-${index}`}
-                fill={entry.pnl >= 0 ? '#22c55e' : '#ef4444'}
-              />
-            ))}
-          </Bar>
-          {/* 縮放/拖動範圍選擇器，預設顯示最近 7 天 */}
-          <Brush
-            dataKey="date"
-            height={30}
-            stroke="#666"
-            fill="#1a1a1a"
-            tickFormatter={formatDate}
-            startIndex={Math.max(0, data.length - 7)}
-          />
+          <Bar
+            dataKey="pnl"
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            shape={((props: any) => {
+              const { x, y, width, height, payload } = props;
+              const fill = (payload?.pnl ?? 0) >= 0 ? '#22c55e' : '#ef4444';
+
+              if (!height || Math.abs(height) < 1) return null;
+
+              // Recharts 傳入的 height 可能為負值（正向柱子往上）
+              // rect 不支援負 height，需手動校正座標
+              const rectY = height < 0 ? y + height : y;
+              const rectH = Math.abs(height);
+
+              return (
+                <rect
+                  x={x}
+                  y={rectY}
+                  width={width}
+                  height={rectH}
+                  fill={fill}
+                  rx={4}
+                  ry={4}
+                />
+              );
+            }) as any}
+          ></Bar>
         </BarChart>
       </ResponsiveContainer>
     </div>

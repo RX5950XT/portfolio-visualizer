@@ -47,6 +47,11 @@ export interface HoldingWithQuote extends Holding {
   expenseRatio?: number;
 }
 
+// 聚合後的持股（同一標的多批次合併）
+export interface AggregatedHolding extends HoldingWithQuote {
+  lots: HoldingWithQuote[];  // 個別批次明細
+}
+
 // API 回應格式
 export interface ApiResponse<T> {
   data?: T;

@@ -112,7 +112,7 @@ export async function GET(request: Request) {
         return history.some((h) => h.date === today);
       });
 
-      if (hasData) {
+      if (hasData && dailyPnL !== 0) {
         pnlData.push({
           date: today,
           pnl: Math.round(dailyPnL),

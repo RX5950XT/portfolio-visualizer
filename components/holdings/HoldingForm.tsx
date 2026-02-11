@@ -131,10 +131,10 @@ export default function HoldingForm({ holding, portfolioId, onClose, onSuccess }
             />
           </div>
 
-          {/* 成本價 */}
+          {/* 均價 */}
           <div>
             <label className="block text-sm text-muted mb-1">
-              每股成本價 *
+              均價 *
             </label>
             <input
               type="number"

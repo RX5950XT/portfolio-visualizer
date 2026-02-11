@@ -1,7 +1,7 @@
-'use client';
+"use client";
 
-import { useState, useEffect, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, useEffect, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import {
   TrendingUp,
   Plus,
@@ -14,15 +14,15 @@ import {
   Edit2,
   Check,
   X,
-} from 'lucide-react';
-import type { Holding, HoldingWithQuote } from '@/types';
-import HoldingForm from '@/components/holdings/HoldingForm';
-import HoldingList from '@/components/holdings/HoldingList';
-import PortfolioPieChart from '@/components/charts/PieChart';
-import AssetTrendChart from '@/components/charts/AssetTrendChart';
-import DailyPnLChart from '@/components/charts/DailyPnLChart';
-import ConfirmDialog from '@/components/ui/ConfirmDialog';
-import PortfolioSelector from '@/components/portfolios/PortfolioSelector';
+} from "lucide-react";
+import type { Holding, HoldingWithQuote, AggregatedHolding } from "@/types";
+import HoldingForm from "@/components/holdings/HoldingForm";
+import HoldingList from "@/components/holdings/HoldingList";
+import PortfolioPieChart from "@/components/charts/PieChart";
+import AssetTrendChart from "@/components/charts/AssetTrendChart";
+import DailyPnLChart from "@/components/charts/DailyPnLChart";
+import ConfirmDialog from "@/components/ui/ConfirmDialog";
+import PortfolioSelector from "@/components/portfolios/PortfolioSelector";
 
 // 股價快取（避免重複請求）
 const quoteCache = new Map<
@@ -34,6 +34,7 @@ const CACHE_TTL = 60000; // 1 分鐘快取
 export default function DashboardPage() {
   const router = useRouter();
   const [holdings, setHoldings] = useState<HoldingWithQuote[]>([]);
+  const [aggregatedHoldings, setAggregatedHoldings] = useState<AggregatedHolding[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [showForm, setShowForm] = useState(false);
@@ -43,50 +44,57 @@ export default function DashboardPage() {
   const [totalCostTWD, setTotalCostTWD] = useState(0);
   const [totalGain, setTotalGain] = useState(0);
   const [totalGainPercent, setTotalGainPercent] = useState(0);
-  const [weightedExpenseRatio, setWeightedExpenseRatio] = useState<number | null>(null);
+  const [weightedExpenseRatio, setWeightedExpenseRatio] = useState<
+    number | null
+  >(null);
 
   // 刪除確認對話框狀態
   const [deleteConfirm, setDeleteConfirm] = useState<{
     isOpen: boolean;
     holdingId: string | null;
     holdingSymbol: string;
-  }>({ isOpen: false, holdingId: null, holdingSymbol: '' });
+  }>({ isOpen: false, holdingId: null, holdingSymbol: "" });
 
   // 現金餘額狀態
   const [cashBalance, setCashBalance] = useState<number>(0);
   const [isEditingCash, setIsEditingCash] = useState(false);
-  const [cashInput, setCashInput] = useState('');
+  const [cashInput, setCashInput] = useState("");
 
   // 投資組合狀態
-  const [currentPortfolioId, setCurrentPortfolioId] = useState<string | null>(null);
-  const [currentPortfolioName, setCurrentPortfolioName] = useState<string>('新的投資組合');
+  const [currentPortfolioId, setCurrentPortfolioId] = useState<string | null>(
+    null,
+  );
+  const [currentPortfolioName, setCurrentPortfolioName] =
+    useState<string>("新的投資組合");
 
   // 圖表刷新 key（變化時觸發圖表重新載入）
   const [chartRefreshKey, setChartRefreshKey] = useState<number>(0);
 
   // 用戶角色狀態
-  const [userRole, setUserRole] = useState<'admin' | 'guest' | null>(null);
-  const isAdmin = userRole === 'admin';
+  const [userRole, setUserRole] = useState<"admin" | "guest" | null>(null);
+  const isAdmin = userRole === "admin";
 
   // 載入持股資料
   const loadHoldings = useCallback(async () => {
     try {
       const url = currentPortfolioId
         ? `/api/holdings?portfolio_id=${currentPortfolioId}`
-        : '/api/holdings';
+        : "/api/holdings";
       const res = await fetch(url);
       const { data, error } = await res.json();
       if (error) throw new Error(error);
       return data as Holding[];
     } catch (err) {
-      console.error('載入持股失敗:', err);
+      console.error("載入持股失敗:", err);
       return [];
     }
   }, [currentPortfolioId]);
 
   // 取得單一股票報價（帶快取）
   const fetchSingleQuote = useCallback(
-    async (symbol: string): Promise<{ price: number; currency: string } | null> => {
+    async (
+      symbol: string,
+    ): Promise<{ price: number; currency: string } | null> => {
       // 檢查快取
       const cached = quoteCache.get(symbol);
       if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
@@ -94,14 +102,16 @@ export default function DashboardPage() {
       }
 
       try {
-        const res = await fetch(`/api/stocks/quote?symbols=${encodeURIComponent(symbol)}`);
+        const res = await fetch(
+          `/api/stocks/quote?symbols=${encodeURIComponent(symbol)}`,
+        );
         if (!res.ok) return null;
 
         const { data } = await res.json();
         if (!data) return null;
 
         const price = data.regularMarketPrice;
-        const currency = data.currency || 'USD';
+        const currency = data.currency || "USD";
 
         if (price && price > 0) {
           quoteCache.set(symbol, { price, currency, timestamp: Date.now() });
@@ -113,13 +123,13 @@ export default function DashboardPage() {
         return null;
       }
     },
-    []
+    [],
   );
 
   // 取得匯率
   const fetchExchangeRate = useCallback(async () => {
     try {
-      const res = await fetch('/api/exchange');
+      const res = await fetch("/api/exchange");
       const { data } = await res.json();
       return data?.rate || 32;
     } catch {
@@ -143,7 +153,7 @@ export default function DashboardPage() {
     try {
       const url = currentPortfolioId
         ? `/api/cash?portfolio_id=${currentPortfolioId}`
-        : '/api/cash';
+        : "/api/cash";
       const res = await fetch(url);
       const { data } = await res.json();
       return data?.amount_twd || 0;
@@ -155,9 +165,9 @@ export default function DashboardPage() {
   // 更新現金餘額
   const updateCashBalance = async (amount: number) => {
     try {
-      const res = await fetch('/api/cash', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+      const res = await fetch("/api/cash", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           amount_twd: amount,
           portfolio_id: currentPortfolioId,
@@ -168,7 +178,7 @@ export default function DashboardPage() {
       setCashBalance(data?.amount_twd || amount);
       return true;
     } catch (err) {
-      console.error('更新現金餘額失敗:', err);
+      console.error("更新現金餘額失敗:", err);
       return false;
     }
   };
@@ -188,6 +198,7 @@ export default function DashboardPage() {
 
     if (holdingsData.length === 0) {
       setHoldings([]);
+      setAggregatedHoldings([]);
       setTotalValueTWD(cash); // 只有現金
       setTotalCostTWD(0);
       setTotalGain(0);
@@ -214,10 +225,11 @@ export default function DashboardPage() {
         const totalCostValue = shares * costPerShare;
         const currentValue = shares * currentPrice;
         const gain = currentValue - totalCostValue;
-        const gainPercent = totalCostValue > 0 ? (gain / totalCostValue) * 100 : 0;
+        const gainPercent =
+          totalCostValue > 0 ? (gain / totalCostValue) * 100 : 0;
 
         // 換算成 TWD
-        const isUS = holding.market === 'US';
+        const isUS = holding.market === "US";
         const costTWD = isUS ? totalCostValue * rate : totalCostValue;
         const valueTWD = isUS ? currentValue * rate : currentValue;
         const gainTWD = valueTWD - costTWD;
@@ -225,15 +237,12 @@ export default function DashboardPage() {
         totalCost += costTWD;
         totalValue += valueTWD;
 
-        // 檢查是否為 ETF 並取得費用率
+        // 由 API 自動判斷是否為 ETF 並取得費用率
         let expenseRatio = null;
-        const isLikelyETF =
-          /^[A-Z]{2,5}$/.test(holding.symbol) ||
-          (holding.symbol.includes('.TW') && /^\d{4,5}\.TW/.test(holding.symbol));
-
-        if (isLikelyETF) {
-          expenseRatio = await fetchExpenseRatio(holding.symbol);
-          if (expenseRatio !== null && valueTWD > 0) {
+        const expenseData = await fetchExpenseRatio(holding.symbol);
+        if (expenseData !== null) {
+          expenseRatio = expenseData;
+          if (valueTWD > 0) {
             etfTotalValue += valueTWD;
             etfWeightedSum += valueTWD * expenseRatio;
           }
@@ -251,22 +260,62 @@ export default function DashboardPage() {
           gainPercent,
           expenseRatio,
         };
-      })
+      }),
     );
 
     setHoldings(enrichedHoldings);
+
+    // 按 symbol 聚合持股（同一標的合併顯示）
+    const grouped = Object.values(
+      enrichedHoldings.reduce<Record<string, AggregatedHolding>>((acc, h) => {
+        const key = h.symbol;
+        if (!acc[key]) {
+          acc[key] = { ...h, lots: [h] };
+        } else {
+          const g = acc[key];
+          const newTotalCostTWD = (g.totalCostTWD || 0) + (h.totalCostTWD || 0);
+          const newCurrentValue = (g.currentValue || 0) + (h.currentValue || 0);
+          const newShares = Number(g.shares) + Number(h.shares);
+          const newTotalCostOrig = (g.totalCost || 0) + (h.totalCost || 0);
+          g.shares = newShares;
+          g.totalCost = newTotalCostOrig;
+          g.totalCostTWD = newTotalCostTWD;
+          g.currentValue = newCurrentValue;
+          g.gain = newCurrentValue - newTotalCostTWD;
+          g.gainPercent = newTotalCostTWD > 0 ? ((newCurrentValue - newTotalCostTWD) / newTotalCostTWD) * 100 : 0;
+          // 加權均價（原幣）
+          g.cost_price = newTotalCostOrig / newShares;
+          // 最早買入日期
+          if (h.purchase_date < g.purchase_date) g.purchase_date = h.purchase_date;
+          g.lots.push(h);
+        }
+        return acc;
+      }, {})
+    );
+    setAggregatedHoldings(grouped);
+
     setTotalValueTWD(totalValue + cash); // 包含現金
     setTotalCostTWD(totalCost);
     setTotalGain(totalValue - totalCost);
-    setTotalGainPercent(totalCost > 0 ? ((totalValue - totalCost) / totalCost) * 100 : 0);
-    setWeightedExpenseRatio(etfTotalValue > 0 ? etfWeightedSum / etfTotalValue : null);
+    setTotalGainPercent(
+      totalCost > 0 ? ((totalValue - totalCost) / totalCost) * 100 : 0,
+    );
+    setWeightedExpenseRatio(
+      etfTotalValue > 0 ? etfWeightedSum / etfTotalValue : null,
+    );
 
     setLoading(false);
     setRefreshing(false);
 
     // 觸發圖表重新載入
-    setChartRefreshKey(prev => prev + 1);
-  }, [loadHoldings, fetchExchangeRate, fetchSingleQuote, fetchExpenseRatio, loadCashBalance]);
+    setChartRefreshKey((prev) => prev + 1);
+  }, [
+    loadHoldings,
+    fetchExchangeRate,
+    fetchSingleQuote,
+    fetchExpenseRatio,
+    loadCashBalance,
+  ]);
 
   useEffect(() => {
     refreshData();
@@ -276,13 +325,13 @@ export default function DashboardPage() {
   useEffect(() => {
     const loadUserRole = async () => {
       try {
-        const res = await fetch('/api/auth/me');
+        const res = await fetch("/api/auth/me");
         const { data } = await res.json();
         if (data?.role) {
           setUserRole(data.role);
         }
       } catch (err) {
-        console.error('載入用戶角色失敗:', err);
+        console.error("載入用戶角色失敗:", err);
       }
     };
     loadUserRole();
@@ -290,8 +339,8 @@ export default function DashboardPage() {
 
   // 登出
   const handleLogout = async () => {
-    await fetch('/api/auth', { method: 'DELETE' });
-    router.push('/');
+    await fetch("/api/auth", { method: "DELETE" });
+    router.push("/");
   };
 
   // 新增/編輯成功後刷新
@@ -316,17 +365,19 @@ export default function DashboardPage() {
     if (!deleteConfirm.holdingId) return;
 
     try {
-      await fetch(`/api/holdings/${deleteConfirm.holdingId}`, { method: 'DELETE' });
-      setDeleteConfirm({ isOpen: false, holdingId: null, holdingSymbol: '' });
+      await fetch(`/api/holdings/${deleteConfirm.holdingId}`, {
+        method: "DELETE",
+      });
+      setDeleteConfirm({ isOpen: false, holdingId: null, holdingSymbol: "" });
       refreshData();
     } catch (err) {
-      console.error('刪除持股失敗:', err);
+      console.error("刪除持股失敗:", err);
     }
   };
 
   // 取消刪除
   const handleDeleteCancel = () => {
-    setDeleteConfirm({ isOpen: false, holdingId: null, holdingSymbol: '' });
+    setDeleteConfirm({ isOpen: false, holdingId: null, holdingSymbol: "" });
   };
 
   // 開始編輯現金
@@ -348,14 +399,14 @@ export default function DashboardPage() {
   // 取消編輯現金
   const handleCancelCash = () => {
     setIsEditingCash(false);
-    setCashInput('');
+    setCashInput("");
   };
 
   // 格式化金額
   const formatCurrency = (value: number) => {
-    return new Intl.NumberFormat('zh-TW', {
-      style: 'currency',
-      currency: 'TWD',
+    return new Intl.NumberFormat("zh-TW", {
+      style: "currency",
+      currency: "TWD",
       minimumFractionDigits: 0,
       maximumFractionDigits: 0,
     }).format(value);
@@ -369,13 +420,13 @@ export default function DashboardPage() {
     );
   }
 
-  // 圓餅圖資料（包含現金）
+  // 圓餅圖資料（用聚合後持股 + 現金）
   const pieChartData = [
-    ...holdings.map((h) => ({
+    ...aggregatedHoldings.map((h) => ({
       name: h.symbol,
       value: h.currentValue || 0,
     })),
-    ...(cashBalance > 0 ? [{ name: '現金', value: cashBalance }] : []),
+    ...(cashBalance > 0 ? [{ name: "現金", value: cashBalance }] : []),
   ];
 
   return (
@@ -384,7 +435,9 @@ export default function DashboardPage() {
       <header className="flex flex-wrap items-center justify-between gap-4 mb-6">
         <div className="flex items-center gap-3">
           <TrendingUp className="w-8 h-8 text-primary" />
-          <h1 className="text-xl md:text-2xl font-bold">Portfolio Visualizer</h1>
+          <h1 className="text-xl md:text-2xl font-bold">
+            Portfolio Visualizer
+          </h1>
           <PortfolioSelector
             currentPortfolioId={currentPortfolioId}
             onSelectPortfolio={(portfolio) => {
@@ -404,7 +457,9 @@ export default function DashboardPage() {
             className="p-2 rounded-lg hover:bg-card transition-colors"
             title="重新整理"
           >
-            <RefreshCw className={`w-5 h-5 ${refreshing ? 'animate-spin' : ''}`} />
+            <RefreshCw
+              className={`w-5 h-5 ${refreshing ? "animate-spin" : ""}`}
+            />
           </button>
           <button
             onClick={handleLogout}
@@ -426,7 +481,8 @@ export default function DashboardPage() {
           </div>
           <p className="text-2xl font-bold">{formatCurrency(totalValueTWD)}</p>
           <p className="text-xs text-muted mt-1">
-            成本: {formatCurrency(totalCostTWD)} | 匯率: {exchangeRate.toFixed(2)}
+            成本: {formatCurrency(totalCostTWD)} | 匯率:{" "}
+            {exchangeRate.toFixed(2)}
           </p>
         </div>
 
@@ -436,12 +492,14 @@ export default function DashboardPage() {
             <TrendingUp className="w-4 h-4" />
             <span className="text-sm">總損益</span>
           </div>
-          <p className={`text-2xl font-bold ${totalGain >= 0 ? 'text-up' : 'text-down'}`}>
-            {totalGain >= 0 ? '+' : ''}
+          <p
+            className={`text-2xl font-bold ${totalGain >= 0 ? "text-up" : "text-down"}`}
+          >
+            {totalGain >= 0 ? "+" : ""}
             {formatCurrency(totalGain)}
           </p>
-          <p className={`text-sm ${totalGain >= 0 ? 'text-up' : 'text-down'}`}>
-            {totalGainPercent >= 0 ? '+' : ''}
+          <p className={`text-sm ${totalGain >= 0 ? "text-up" : "text-down"}`}>
+            {totalGainPercent >= 0 ? "+" : ""}
             {totalGainPercent.toFixed(2)}%
           </p>
         </div>
@@ -500,22 +558,26 @@ export default function DashboardPage() {
             <span className="text-sm">持股分佈</span>
           </div>
           <div className="space-y-2">
-            {/* 持股檔數 */}
+            {/* 持股檔數（用聚合後的計數） */}
             <p className="text-lg font-bold">
-              台股 {holdings.filter(h => h.market === 'TW').length} 檔 / 美股 {holdings.filter(h => h.market === 'US').length} 檔
+              台股 {aggregatedHoldings.filter((h) => h.market === "TW").length} 檔 / 美股{" "}
+              {aggregatedHoldings.filter((h) => h.market === "US").length} 檔
             </p>
             {/* 權重分佈 */}
             <div className="text-sm space-y-1">
               {(() => {
-                const twValue = holdings
-                  .filter(h => h.market === 'TW')
+                const twValue = aggregatedHoldings
+                  .filter((h) => h.market === "TW")
                   .reduce((sum, h) => sum + (h.currentValue || 0), 0);
-                const usValue = holdings
-                  .filter(h => h.market === 'US')
+                const usValue = aggregatedHoldings
+                  .filter((h) => h.market === "US")
                   .reduce((sum, h) => sum + (h.currentValue || 0), 0);
-                const twWeight = totalValueTWD > 0 ? (twValue / totalValueTWD * 100) : 0;
-                const usWeight = totalValueTWD > 0 ? (usValue / totalValueTWD * 100) : 0;
-                const cashWeight = totalValueTWD > 0 ? (cashBalance / totalValueTWD * 100) : 0;
+                const twWeight =
+                  totalValueTWD > 0 ? (twValue / totalValueTWD) * 100 : 0;
+                const usWeight =
+                  totalValueTWD > 0 ? (usValue / totalValueTWD) * 100 : 0;
+                const cashWeight =
+                  totalValueTWD > 0 ? (cashBalance / totalValueTWD) * 100 : 0;
                 return (
                   <>
                     <div className="flex justify-between">
@@ -546,7 +608,7 @@ export default function DashboardPage() {
           <p className="text-2xl font-bold">
             {weightedExpenseRatio !== null
               ? `${(weightedExpenseRatio * 100).toFixed(3)}%`
-              : '—'}
+              : "—"}
           </p>
         </div>
       </div>
@@ -557,7 +619,7 @@ export default function DashboardPage() {
         <div className="card">
           <h2 className="text-lg font-semibold mb-4">資產配置</h2>
           {pieChartData.length > 0 && pieChartData.some((d) => d.value > 0) ? (
-            <PortfolioPieChart holdings={holdings} cashBalance={cashBalance} />
+            <PortfolioPieChart holdings={aggregatedHoldings} cashBalance={cashBalance} />
           ) : (
             <div className="h-64 flex items-center justify-center text-muted">
               尚無資產資料
@@ -568,13 +630,19 @@ export default function DashboardPage() {
         {/* 總資產走勢圖 */}
         <div className="card">
           <h2 className="text-lg font-semibold mb-4">總資產走勢</h2>
-          <AssetTrendChart portfolioId={currentPortfolioId} refreshKey={chartRefreshKey} />
+          <AssetTrendChart
+            portfolioId={currentPortfolioId}
+            refreshKey={chartRefreshKey}
+          />
         </div>
 
-        {/* 損益走勢圖 */}
+        {/* 每日損益變化圖 */}
         <div className="card">
-          <h2 className="text-lg font-semibold mb-4">損益走勢 (近 7 天)</h2>
-          <DailyPnLChart portfolioId={currentPortfolioId} refreshKey={chartRefreshKey} />
+          <h2 className="text-lg font-semibold mb-4">每日損益變化</h2>
+          <DailyPnLChart
+            portfolioId={currentPortfolioId}
+            refreshKey={chartRefreshKey}
+          />
         </div>
       </div>
 
@@ -594,7 +662,7 @@ export default function DashboardPage() {
         </div>
 
         <HoldingList
-          holdings={holdings}
+          holdings={aggregatedHoldings}
           exchangeRate={exchangeRate}
           totalValue={totalValueTWD}
           onEdit={(h) => {
