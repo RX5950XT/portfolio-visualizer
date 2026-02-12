@@ -13,9 +13,11 @@ import {
   Edit2,
   Check,
   X,
+  History,
 } from "lucide-react";
 import type { Holding, HoldingWithQuote, AggregatedHolding } from "@/types";
 import HoldingForm from "@/components/holdings/HoldingForm";
+import SellForm from "@/components/holdings/SellForm";
 import HoldingList from "@/components/holdings/HoldingList";
 import PortfolioPieChart from "@/components/charts/PieChart";
 import AssetTrendChart from "@/components/charts/AssetTrendChart";
@@ -54,17 +56,28 @@ export default function DashboardPage() {
     holdingSymbol: string;
   }>({ isOpen: false, holdingId: null, holdingSymbol: "" });
 
+  // 賣出彈窗狀態
+  const [sellTarget, setSellTarget] = useState<HoldingWithQuote | null>(null);
+
   // 現金餘額狀態
   const [cashBalance, setCashBalance] = useState<number>(0);
   const [isEditingCash, setIsEditingCash] = useState(false);
   const [cashInput, setCashInput] = useState("");
 
-  // 投資組合狀態
-  const [currentPortfolioId, setCurrentPortfolioId] = useState<string | null>(
-    null,
-  );
+  // 投資組合狀態（從 URL 取得返回參數）
+  const [currentPortfolioId, setCurrentPortfolioId] = useState<string | null>(() => {
+    if (typeof window !== 'undefined') {
+      return new URLSearchParams(window.location.search).get('portfolio_id');
+    }
+    return null;
+  });
   const [currentPortfolioName, setCurrentPortfolioName] =
-    useState<string>("新的投資組合");
+    useState<string>(() => {
+      if (typeof window !== 'undefined') {
+        return new URLSearchParams(window.location.search).get('name') || '新的投資組合';
+      }
+      return '新的投資組合';
+    });
 
   // 圖表刷新 key（變化時觸發圖表重新載入）
   const [chartRefreshKey, setChartRefreshKey] = useState<number>(0);
@@ -449,6 +462,19 @@ export default function DashboardPage() {
         <div className="flex items-center gap-2">
           <button
             onClick={() => {
+              const params = new URLSearchParams();
+              if (currentPortfolioId) params.set('portfolio_id', currentPortfolioId);
+              if (currentPortfolioName) params.set('name', currentPortfolioName);
+              const qs = params.toString();
+              router.push(`/transactions${qs ? `?${qs}` : ''}`);
+            }}
+            className="p-2 rounded-lg hover:bg-card transition-colors"
+            title="交易紀錄"
+          >
+            <History className="w-5 h-5" />
+          </button>
+          <button
+            onClick={() => {
               quoteCache.clear();
               refreshData();
             }}
@@ -685,6 +711,7 @@ export default function DashboardPage() {
             setShowForm(true);
           }}
           onDelete={handleDeleteClick}
+          onSell={isAdmin ? (h) => setSellTarget(h) : undefined}
           readOnly={!isAdmin}
         />
       </div>
@@ -699,6 +726,20 @@ export default function DashboardPage() {
             setEditingHolding(null);
           }}
           onSuccess={handleFormSuccess}
+        />
+      )}
+
+      {/* 賣出彈窗 */}
+      {sellTarget && (
+        <SellForm
+          holding={sellTarget}
+          portfolioId={currentPortfolioId}
+          exchangeRate={exchangeRate}
+          onClose={() => setSellTarget(null)}
+          onSuccess={() => {
+            setSellTarget(null);
+            refreshData();
+          }}
         />
       )}
 

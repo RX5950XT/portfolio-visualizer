@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Pencil, Trash2, TrendingUp, TrendingDown, ChevronDown, ChevronRight } from 'lucide-react';
+import { Pencil, Trash2, TrendingUp, TrendingDown, ChevronDown, ChevronRight, ArrowRightLeft } from 'lucide-react';
 import type { AggregatedHolding, HoldingWithQuote } from '@/types';
 
 interface Props {
@@ -10,10 +10,11 @@ interface Props {
   totalValue: number;
   onEdit: (holding: HoldingWithQuote) => void;
   onDelete: (holding: HoldingWithQuote) => void;
+  onSell?: (holding: HoldingWithQuote) => void;
   readOnly?: boolean;
 }
 
-export default function HoldingList({ holdings, exchangeRate, totalValue, onEdit, onDelete, readOnly = false }: Props) {
+export default function HoldingList({ holdings, exchangeRate, totalValue, onEdit, onDelete, onSell, readOnly = false }: Props) {
   const [expandedSymbols, setExpandedSymbols] = useState<Set<string>>(new Set());
 
   if (holdings.length === 0) {
@@ -161,23 +162,36 @@ export default function HoldingList({ holdings, exchangeRate, totalValue, onEdit
                     }
                   </td>
                   <td className="py-3 text-right">
-                    {/* 單一 lot 時直接顯示編輯刪除 */}
-                    {!readOnly && !hasMultipleLots && (
+                    {!readOnly && (
                       <div className="flex items-center justify-end gap-1">
-                        <button
-                          onClick={(e) => { e.stopPropagation(); onEdit(holding.lots[0]); }}
-                          className="p-1.5 rounded hover:bg-border transition-colors"
-                          title="編輯"
-                        >
-                          <Pencil className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={(e) => { e.stopPropagation(); onDelete(holding.lots[0]); }}
-                          className="p-1.5 rounded hover:bg-border transition-colors text-danger"
-                          title="刪除"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                        {onSell && (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); onSell(holding as unknown as HoldingWithQuote); }}
+                            className="p-1.5 rounded hover:bg-border transition-colors text-yellow-500"
+                            title="賣出"
+                          >
+                            <ArrowRightLeft className="w-4 h-4" />
+                          </button>
+                        )}
+                        {/* 單一 lot 才在聚合行顯示編輯/刪除 */}
+                        {!hasMultipleLots && (
+                          <>
+                            <button
+                              onClick={(e) => { e.stopPropagation(); onEdit(holding.lots[0]); }}
+                              className="p-1.5 rounded hover:bg-border transition-colors"
+                              title="編輯"
+                            >
+                              <Pencil className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={(e) => { e.stopPropagation(); onDelete(holding.lots[0]); }}
+                              className="p-1.5 rounded hover:bg-border transition-colors text-danger"
+                              title="刪除"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </>
+                        )}
                       </div>
                     )}
                   </td>
@@ -330,6 +344,11 @@ export default function HoldingList({ holdings, exchangeRate, totalValue, onEdit
                           </span>
                           {!readOnly && (
                             <>
+                              {onSell && (
+                                <button onClick={() => onSell(lot)} className="p-1 rounded hover:bg-border text-yellow-500" title="賣出">
+                                  <ArrowRightLeft className="w-3 h-3" />
+                                </button>
+                              )}
                               <button onClick={() => onEdit(lot)} className="p-1 rounded hover:bg-border" title="編輯">
                                 <Pencil className="w-3 h-3" />
                               </button>
@@ -356,6 +375,11 @@ export default function HoldingList({ holdings, exchangeRate, totalValue, onEdit
                   </div>
                   {!readOnly && (
                     <div className="flex items-center gap-2 ml-auto">
+                      {onSell && (
+                        <button onClick={() => onSell(holding.lots[0])} className="p-1.5 rounded hover:bg-border transition-colors text-yellow-500" title="賣出">
+                          <ArrowRightLeft className="w-4 h-4" />
+                        </button>
+                      )}
                       <button onClick={() => onEdit(holding.lots[0])} className="p-1.5 rounded hover:bg-border transition-colors" title="編輯">
                         <Pencil className="w-4 h-4" />
                       </button>

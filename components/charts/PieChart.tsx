@@ -104,7 +104,7 @@ export default function PortfolioPieChart({
       </div>
 
       {/* Legend（右側，由高到低排序 + 權重百分比） */}
-      <div className="flex-shrink-0 w-[165px] space-y-1 overflow-y-auto max-h-[280px] pt-1">
+      <div className="flex-shrink-0 w-[180px] space-y-1 overflow-y-auto max-h-[280px] pt-1 pr-4">
         {sortedData.map((entry, index) => {
           const percent = ((entry.value / total) * 100).toFixed(1);
           return (

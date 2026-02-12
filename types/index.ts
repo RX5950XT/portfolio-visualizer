@@ -57,3 +57,19 @@ export interface ApiResponse<T> {
   data?: T;
   error?: string;
 }
+
+// 交易紀錄
+export interface Transaction {
+  id: string;
+  symbol: string;
+  type: 'buy' | 'sell';
+  shares: number;
+  price: number;
+  transaction_date: string;
+  market: 'US' | 'TW';
+  realized_pnl_twd: number | null;
+  holding_id: string | null;
+  portfolio_id: string | null;
+  notes: string | null;
+  created_at: string;
+}
