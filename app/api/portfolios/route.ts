@@ -15,11 +15,19 @@ async function requireAdmin() {
 export async function GET() {
   try {
     const supabase = createServerClient();
+    const role = await getUserRole();
 
-    const { data, error } = await supabase
+    let query = supabase
       .from('portfolios')
       .select('*')
       .order('created_at', { ascending: true });
+
+    // 訪客只能看到管理員開放的組合
+    if (role === 'guest') {
+      query = query.eq('visible_to_guest', true);
+    }
+
+    const { data, error } = await query;
 
     if (error) {
       // 如果表格不存在，回傳預設組合

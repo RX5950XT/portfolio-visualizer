@@ -39,7 +39,7 @@ export async function GET(request: Request, { params }: RouteParams) {
   }
 }
 
-// PUT: 更新投資組合（重命名）
+// PUT: 更新投資組合（重命名 / 切換訪客可見性）
 export async function PUT(request: Request, { params }: RouteParams) {
   try {
     // 權限檢查：只有管理員可以更新投資組合
@@ -48,17 +48,26 @@ export async function PUT(request: Request, { params }: RouteParams) {
 
     const { id } = await params;
     const body = await request.json();
-    const { name } = body;
+    const { name, visible_to_guest } = body;
 
-    if (!name || typeof name !== 'string') {
-      return NextResponse.json({ error: '請提供組合名稱' }, { status: 400 });
+    // 至少要提供一個可更新的欄位
+    const updateData: Record<string, unknown> = {};
+    if (typeof name === 'string' && name.trim()) {
+      updateData.name = name.trim();
+    }
+    if (typeof visible_to_guest === 'boolean') {
+      updateData.visible_to_guest = visible_to_guest;
+    }
+
+    if (Object.keys(updateData).length === 0) {
+      return NextResponse.json({ error: '請提供要更新的欄位' }, { status: 400 });
     }
 
     const supabase = createServerClient();
 
     const { data, error } = await supabase
       .from('portfolios')
-      .update({ name: name.trim() })
+      .update(updateData)
       .eq('id', id)
       .select()
       .single();

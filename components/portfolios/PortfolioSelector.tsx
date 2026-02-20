@@ -9,6 +9,8 @@ import {
   Check,
   X,
   FolderOpen,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
 
@@ -16,6 +18,7 @@ interface Portfolio {
   id: string;
   name: string;
   is_default?: boolean;
+  visible_to_guest?: boolean;
 }
 
 interface Props {
@@ -131,6 +134,27 @@ export default function PortfolioSelector({
     }
   };
 
+  // 切換訪客可見性
+  const handleToggleVisibility = async (portfolio: Portfolio) => {
+    const newVisibility = !portfolio.visible_to_guest;
+    try {
+      const res = await fetch(`/api/portfolios/${portfolio.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ visible_to_guest: newVisibility }),
+      });
+      const { data } = await res.json();
+
+      if (data) {
+        setPortfolios((prev) =>
+          prev.map((p) => (p.id === portfolio.id ? data : p))
+        );
+      }
+    } catch (err) {
+      console.error('切換可見性失敗:', err);
+    }
+  };
+
   // 請求刪除投資組合（開啟確認對話框）
   const handleDelete = (portfolio: Portfolio) => {
     setDeleteConfirm({
@@ -240,6 +264,29 @@ export default function PortfolioSelector({
                     </button>
                     {!readOnly && (
                       <div className="flex items-center gap-1">
+                        {/* 訪客可見性切換 */}
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleToggleVisibility(portfolio);
+                          }}
+                          className={`p-1 rounded transition-colors ${
+                            portfolio.visible_to_guest !== false
+                              ? 'text-primary hover:bg-primary/20'
+                              : 'text-muted hover:bg-border'
+                          }`}
+                          title={
+                            portfolio.visible_to_guest !== false
+                              ? '訪客可見（點擊隱藏）'
+                              : '訪客不可見（點擊開放）'
+                          }
+                        >
+                          {portfolio.visible_to_guest !== false ? (
+                            <Eye className="w-3.5 h-3.5" />
+                          ) : (
+                            <EyeOff className="w-3.5 h-3.5" />
+                          )}
+                        </button>
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
@@ -333,3 +380,4 @@ export default function PortfolioSelector({
     </>
   );
 }
+

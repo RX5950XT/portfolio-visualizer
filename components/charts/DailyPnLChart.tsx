@@ -1,6 +1,6 @@
-'use client';
+"use client";
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from "react";
 import {
   BarChart,
   Bar,
@@ -9,8 +9,8 @@ import {
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
-} from 'recharts';
-import { RefreshCw } from 'lucide-react';
+} from "recharts";
+import { RefreshCw } from "lucide-react";
 
 interface DailyPnLPoint {
   date: string;
@@ -22,8 +22,16 @@ interface Props {
   refreshKey?: number;
 }
 
+const DAY_OPTIONS = [30, 60, 90, 180] as const;
+
+// 根據天數計算合適的 XAxis 刻度間隔，讓標籤數量維持在 6~8 個左右
+function xAxisInterval(days: number): number {
+  return Math.max(1, Math.floor(days / 6) - 1);
+}
+
 export default function DailyPnLChart({ portfolioId, refreshKey }: Props) {
   const [data, setData] = useState<DailyPnLPoint[]>([]);
+  const [days, setDays] = useState<number>(30);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -32,9 +40,8 @@ export default function DailyPnLChart({ portfolioId, refreshKey }: Props) {
     setError(null);
 
     try {
-      // 使用 timestamp 避免瀏覽器快取
       const timestamp = Date.now();
-      let url = `/api/charts/daily-pnl?days=30&_t=${timestamp}`;
+      let url = `/api/charts/daily-pnl?days=${days}&_t=${timestamp}`;
       if (portfolioId) {
         url += `&portfolio_id=${portfolioId}`;
       }
@@ -47,12 +54,12 @@ export default function DailyPnLChart({ portfolioId, refreshKey }: Props) {
 
       setData(pnlData || []);
     } catch (err) {
-      console.error('載入損益資料失敗:', err);
-      setError('無法載入損益資料');
+      console.error("載入損益資料失敗:", err);
+      setError("無法載入損益資料");
     } finally {
       setLoading(false);
     }
-  }, [portfolioId]);
+  }, [portfolioId, days]);
 
   useEffect(() => {
     fetchData();
@@ -60,7 +67,7 @@ export default function DailyPnLChart({ portfolioId, refreshKey }: Props) {
 
   // 格式化金額
   const formatCurrency = (value: number) => {
-    const prefix = value >= 0 ? '+' : '';
+    const prefix = value >= 0 ? "+" : "";
     if (Math.abs(value) >= 1000) {
       return `${prefix}${(value / 1000).toFixed(0)}K`;
     }
@@ -89,8 +96,10 @@ export default function DailyPnLChart({ portfolioId, refreshKey }: Props) {
       return (
         <div className="bg-card border border-border rounded-lg p-3 shadow-lg">
           <p className="text-sm text-muted mb-1">{label}</p>
-          <p className={`font-semibold ${isPositive ? 'text-up' : 'text-down'}`}>
-            {isPositive ? '+' : ''}NT$ {value.toLocaleString('zh-TW')}
+          <p
+            className={`font-semibold ${isPositive ? "text-up" : "text-down"}`}
+          >
+            {isPositive ? "+" : ""}NT$ {value.toLocaleString("zh-TW")}
           </p>
         </div>
       );
@@ -98,26 +107,54 @@ export default function DailyPnLChart({ portfolioId, refreshKey }: Props) {
     return null;
   };
 
+  // 天數切換按鈕列（不論載入狀態都顯示，避免版面跳動）
+  const daySelector = (
+    <div className="flex items-center gap-1 mb-3">
+      {DAY_OPTIONS.map((d) => (
+        <button
+          key={d}
+          onClick={() => setDays(d)}
+          className={`px-2.5 py-1 text-xs rounded-full font-medium transition-colors ${
+            days === d
+              ? "bg-primary text-white"
+              : "bg-border/50 text-muted hover:text-foreground hover:bg-border"
+          }`}
+        >
+          {d}日
+        </button>
+      ))}
+    </div>
+  );
+
   if (loading) {
     return (
-      <div className="h-64 flex items-center justify-center">
-        <RefreshCw className="w-6 h-6 animate-spin text-primary" />
+      <div className="h-full flex flex-col">
+        {daySelector}
+        <div className="flex-1 flex items-center justify-center">
+          <RefreshCw className="w-6 h-6 animate-spin text-primary" />
+        </div>
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="h-64 flex items-center justify-center text-danger">
-        {error}
+      <div className="h-full flex flex-col">
+        {daySelector}
+        <div className="flex-1 flex items-center justify-center text-danger">
+          {error}
+        </div>
       </div>
     );
   }
 
   if (data.length === 0) {
     return (
-      <div className="h-64 flex items-center justify-center text-muted">
-        尚無足夠資料顯示損益圖
+      <div className="h-full flex flex-col">
+        {daySelector}
+        <div className="flex-1 flex items-center justify-center text-muted">
+          尚無足夠資料顯示損益圖
+        </div>
       </div>
     );
   }
@@ -128,60 +165,69 @@ export default function DailyPnLChart({ portfolioId, refreshKey }: Props) {
   const yRange = Math.ceil(maxAbs / 1000) * 1000 || 1000;
 
   return (
-    <div className="h-full">
-      <ResponsiveContainer width="100%" height="100%">
-        <BarChart
-          data={data}
-          margin={{ top: 5, right: 20, left: 10, bottom: 5 }}
-        >
-          <CartesianGrid strokeDasharray="3 3" stroke="#333" vertical={false} />
-          <XAxis
-            dataKey="date"
-            tickFormatter={formatDate}
-            stroke="#666"
-            fontSize={12}
-            tickLine={false}
-            interval={4}
-          />
-          <YAxis
-            tickFormatter={formatCurrency}
-            stroke="#666"
-            fontSize={12}
-            tickLine={false}
-            axisLine={false}
-            domain={[-yRange, yRange]}
-            tickCount={5}
-          />
-          <Tooltip content={<CustomTooltip />} />
-          <Bar
-            dataKey="pnl"
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            shape={((props: any) => {
-              const { x, y, width, height, payload } = props;
-              const fill = (payload?.pnl ?? 0) >= 0 ? '#22c55e' : '#ef4444';
+    <div className="h-full flex flex-col">
+      {daySelector}
+      <div className="flex-1">
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart
+            data={data}
+            margin={{ top: 5, right: 20, left: 10, bottom: 5 }}
+          >
+            <CartesianGrid
+              strokeDasharray="3 3"
+              stroke="#333"
+              vertical={false}
+            />
+            <XAxis
+              dataKey="date"
+              tickFormatter={formatDate}
+              stroke="#666"
+              fontSize={12}
+              tickLine={false}
+              interval={xAxisInterval(days)}
+            />
+            <YAxis
+              tickFormatter={formatCurrency}
+              stroke="#666"
+              fontSize={12}
+              tickLine={false}
+              axisLine={false}
+              domain={[-yRange, yRange]}
+              tickCount={5}
+            />
+            <Tooltip content={<CustomTooltip />} />
+            <Bar
+              dataKey="pnl"
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              shape={
+                ((props: any) => {
+                  const { x, y, width, height, payload } = props;
+                  const fill = (payload?.pnl ?? 0) >= 0 ? "#22c55e" : "#ef4444";
 
-              if (!height || Math.abs(height) < 1) return null;
+                  if (!height || Math.abs(height) < 1) return null;
 
-              // Recharts 傳入的 height 可能為負值（正向柱子往上）
-              // rect 不支援負 height，需手動校正座標
-              const rectY = height < 0 ? y + height : y;
-              const rectH = Math.abs(height);
+                  // Recharts 傳入的 height 可能為負值（正向柱子往上）
+                  // rect 不支援負 height，需手動校正座標
+                  const rectY = height < 0 ? y + height : y;
+                  const rectH = Math.abs(height);
 
-              return (
-                <rect
-                  x={x}
-                  y={rectY}
-                  width={width}
-                  height={rectH}
-                  fill={fill}
-                  rx={4}
-                  ry={4}
-                />
-              );
-            }) as any}
-          ></Bar>
-        </BarChart>
-      </ResponsiveContainer>
+                  return (
+                    <rect
+                      x={x}
+                      y={rectY}
+                      width={width}
+                      height={rectH}
+                      fill={fill}
+                      rx={4}
+                      ry={4}
+                    />
+                  );
+                }) as any
+              }
+            ></Bar>
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
     </div>
   );
 }
