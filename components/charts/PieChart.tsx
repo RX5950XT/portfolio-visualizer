@@ -80,17 +80,17 @@ export default function PortfolioPieChart({
   }
 
   return (
-    <div className="flex items-start gap-3 h-full min-h-[280px]">
-      {/* 圓餅圖（左側） */}
-      <div className="flex-1 w-[260px] h-[260px]">
+    <div className="flex flex-col sm:flex-row sm:items-start gap-4">
+      {/* 圓餅圖 */}
+      <div className="w-full h-[220px] sm:flex-1 sm:h-[260px]">
         <ResponsiveContainer width="100%" height="100%">
           <PieChart>
             <Pie
               data={sortedData}
               cx="50%"
               cy="50%"
-              innerRadius={65}
-              outerRadius={110}
+              innerRadius={60}
+              outerRadius={100}
               paddingAngle={2}
               dataKey="value"
             >
@@ -103,8 +103,8 @@ export default function PortfolioPieChart({
         </ResponsiveContainer>
       </div>
 
-      {/* Legend（右側，由高到低排序 + 權重百分比） */}
-      <div className="flex-shrink-0 w-[180px] space-y-1 overflow-y-auto max-h-[280px] pt-1 pr-4">
+      {/* Legend（手機 2 欄，桌面單欄縱向滾動） */}
+      <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 sm:block sm:w-[180px] sm:space-y-1 sm:overflow-y-auto sm:max-h-[280px] sm:pt-1 sm:pr-4">
         {sortedData.map((entry, index) => {
           const percent = ((entry.value / total) * 100).toFixed(1);
           return (
@@ -119,7 +119,7 @@ export default function PortfolioPieChart({
                 />
                 <span className="text-muted truncate">{entry.name}</span>
               </div>
-              <span className="text-muted flex-shrink-0">{percent}%</span>
+              <span className="text-muted flex-shrink-0 ml-1">{percent}%</span>
             </div>
           );
         })}

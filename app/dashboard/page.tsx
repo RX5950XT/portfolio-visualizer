@@ -445,11 +445,13 @@ export default function DashboardPage() {
     <div className="min-h-screen p-4 md:p-6 lg:p-8">
       {/* Header */}
       <header className="flex flex-wrap items-center justify-between gap-4 mb-6">
-        <div className="flex items-center gap-3">
-          <TrendingUp className="w-8 h-8 text-primary" />
-          <h1 className="text-xl md:text-2xl font-bold">
-            Portfolio Visualizer
-          </h1>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-2">
+            <TrendingUp className="w-7 h-7 sm:w-8 sm:h-8 text-primary" />
+            <h1 className="text-lg sm:text-xl md:text-2xl font-bold">
+              Portfolio Visualizer
+            </h1>
+          </div>
           <PortfolioSelector
             currentPortfolioId={currentPortfolioId}
             onSelectPortfolio={(portfolio) => {
