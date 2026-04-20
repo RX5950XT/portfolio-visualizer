@@ -1,35 +1,32 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
+import { AUTH_COOKIE_NAME, verifyAuthToken } from '@/lib/auth-token';
 
 // 不需要認證的路徑
 const publicPaths = ['/', '/api/auth'];
 
-export function middleware(request: NextRequest) {
+export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
-  
-  // 檢查是否為公開路徑
+
   const isPublicPath = publicPaths.some(
     (path) => pathname === path || pathname.startsWith('/api/auth')
   );
-  
+
   if (isPublicPath) {
     return NextResponse.next();
   }
-  
-  // 檢查認證 Cookie（支援舊版 'authenticated' 與新版 RBAC 角色）
-  const authCookie = request.cookies.get('portfolio_auth');
-  const cookieValue = authCookie?.value;
-  const isAuthenticated = cookieValue === 'admin' || cookieValue === 'guest' || cookieValue === 'authenticated';
-  
-  if (!isAuthenticated) {
-    // API 請求回傳 401
+
+  // 驗證 HMAC 簽章 token（舊版純文字 cookie 會驗證失敗 → 強制重登）
+  const token = request.cookies.get(AUTH_COOKIE_NAME)?.value;
+  const role = await verifyAuthToken(token);
+
+  if (!role) {
     if (pathname.startsWith('/api/')) {
       return NextResponse.json({ error: '未授權' }, { status: 401 });
     }
-    // 頁面請求導向首頁
     return NextResponse.redirect(new URL('/', request.url));
   }
-  
+
   return NextResponse.next();
 }
 

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase';
-import { getUserRole } from '@/lib/auth';
+import { getUserRole, getVisiblePortfolioIdsForRole } from '@/lib/auth';
 import type { Holding } from '@/types';
 
 // 權限檢查輔助函式
@@ -15,8 +15,19 @@ async function requireAdmin() {
 // GET: 取得指定投資組合的持股
 export async function GET(request: Request) {
   try {
+    const role = await getUserRole();
+    if (!role) {
+      return NextResponse.json({ error: '未授權' }, { status: 401 });
+    }
+
     const { searchParams } = new URL(request.url);
     const portfolioId = searchParams.get('portfolio_id');
+
+    // Why: 訪客只能讀取 visible_to_guest=true 的組合，否則可用 portfolio_id 直接撈出隱藏資料
+    const visibleIds = await getVisiblePortfolioIdsForRole(role);
+    if (visibleIds !== null && portfolioId && !visibleIds.includes(portfolioId)) {
+      return NextResponse.json({ error: '無權限檢視此投資組合' }, { status: 403 });
+    }
 
     const supabase = createServerClient();
 
@@ -25,9 +36,14 @@ export async function GET(request: Request) {
       .select('*')
       .order('created_at', { ascending: false });
 
-    // 如果指定了投資組合，過濾持股
     if (portfolioId) {
       query = query.eq('portfolio_id', portfolioId);
+    } else if (visibleIds !== null) {
+      // 訪客無指定組合時，限縮到可見組合
+      if (visibleIds.length === 0) {
+        return NextResponse.json({ data: [] as Holding[] });
+      }
+      query = query.in('portfolio_id', visibleIds);
     }
 
     const { data, error } = await query;

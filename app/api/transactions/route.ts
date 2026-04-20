@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase';
-import { getUserRole } from '@/lib/auth';
+import { getUserRole, getVisiblePortfolioIdsForRole } from '@/lib/auth';
 import { fetchExchangeRate } from '@/lib/stocks';
 
 // 權限檢查輔助函式
@@ -15,8 +15,18 @@ async function requireAdmin() {
 // GET: 取得交易歷史
 export async function GET(request: Request) {
   try {
+    const role = await getUserRole();
+    if (!role) {
+      return NextResponse.json({ error: '未授權' }, { status: 401 });
+    }
+
     const { searchParams } = new URL(request.url);
     const portfolioId = searchParams.get('portfolio_id');
+
+    const visibleIds = await getVisiblePortfolioIdsForRole(role);
+    if (visibleIds !== null && portfolioId && !visibleIds.includes(portfolioId)) {
+      return NextResponse.json({ error: '無權限檢視此投資組合' }, { status: 403 });
+    }
 
     const supabase = createServerClient();
 
@@ -28,6 +38,11 @@ export async function GET(request: Request) {
 
     if (portfolioId) {
       query = query.eq('portfolio_id', portfolioId);
+    } else if (visibleIds !== null) {
+      if (visibleIds.length === 0) {
+        return NextResponse.json({ data: [] });
+      }
+      query = query.in('portfolio_id', visibleIds);
     }
 
     const { data, error } = await query;

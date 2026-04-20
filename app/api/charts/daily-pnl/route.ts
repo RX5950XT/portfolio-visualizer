@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase';
+import { getUserRole, getVisiblePortfolioIdsForRole } from '@/lib/auth';
 import { fetchHistory, fetchExchangeRate } from '@/lib/stocks';
 
 interface Holding {
@@ -19,17 +20,31 @@ interface DailyPnLPoint {
 // GET: 取得每日損益資料（最近 7 天）
 export async function GET(request: Request) {
   try {
+    const role = await getUserRole();
+    if (!role) {
+      return NextResponse.json({ error: '未授權' }, { status: 401 });
+    }
+
     const { searchParams } = new URL(request.url);
     const days = parseInt(searchParams.get('days') || '7', 10);
     const portfolioId = searchParams.get('portfolio_id');
 
+    const visibleIds = await getVisiblePortfolioIdsForRole(role);
+    if (visibleIds !== null && portfolioId && !visibleIds.includes(portfolioId)) {
+      return NextResponse.json({ error: '無權限檢視此投資組合' }, { status: 403 });
+    }
+
     const supabase = createServerClient();
 
-    // 取得持股（可過濾投資組合）
     let query = supabase.from('holdings').select('*');
 
     if (portfolioId) {
       query = query.eq('portfolio_id', portfolioId);
+    } else if (visibleIds !== null) {
+      if (visibleIds.length === 0) {
+        return NextResponse.json({ data: [] });
+      }
+      query = query.in('portfolio_id', visibleIds);
     }
 
     const { data: holdings, error } = await query;

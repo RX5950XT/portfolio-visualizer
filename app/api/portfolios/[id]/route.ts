@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase';
-import { getUserRole } from '@/lib/auth';
+import { getUserRole, getVisiblePortfolioIdsForRole } from '@/lib/auth';
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -18,7 +18,18 @@ async function requireAdmin() {
 // GET: 取得單一投資組合
 export async function GET(request: Request, { params }: RouteParams) {
   try {
+    const role = await getUserRole();
+    if (!role) {
+      return NextResponse.json({ error: '未授權' }, { status: 401 });
+    }
+
     const { id } = await params;
+
+    const visibleIds = await getVisiblePortfolioIdsForRole(role);
+    if (visibleIds !== null && !visibleIds.includes(id)) {
+      return NextResponse.json({ error: '無權限檢視此投資組合' }, { status: 403 });
+    }
+
     const supabase = createServerClient();
 
     const { data, error } = await supabase
