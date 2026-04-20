@@ -118,7 +118,7 @@
 
 ### API Routes
 - 路徑格式：`/api/[resource]/route.ts`
-- 使用 Next.js 14 Route Handlers
+- 使用 Next.js Route Handlers（App Router）
 - 回傳格式：`{ data: T } | { error: string }`
 
 ### 投資組合專屬規範
@@ -152,10 +152,12 @@ npx shadcn@latest add button card input label dialog table
 2. 執行 `migrations/` 下的 SQL（`create_portfolios.sql` → `create_transactions.sql` → `add_guest_visibility.sql`）
 3. 設定環境變數
 
-### Phase 3：認證機制
+### Phase 3：認證機制（已完成，含安全強化）
 - `/app/page.tsx`（登入頁）
 - `/app/api/auth/route.ts`
-- `middleware.ts` 檢查認證狀態
+- `lib/auth-token.ts`（Edge-safe HMAC token，供 middleware 使用）
+- `lib/auth.ts`（Cookie 管理 + 訪客可見性過濾）
+- `middleware.ts` 驗證 HMAC 簽章 token
 
 ### Phase 4：持股管理
 - `/app/dashboard/page.tsx`
@@ -187,14 +189,23 @@ npx shadcn@latest add button card input label dialog table
 ```env
 # .env.local
 
-# Site Password
+# 認證簽章金鑰（必填，至少 32 字元）
+# 產生方式：openssl rand -hex 32
+AUTH_SECRET=your_64_char_hex_secret
+
+# 管理員密碼
 SITE_PASSWORD=your_secure_password
+
+# 訪客密碼（可選）
+GUEST_PASSWORD=your_guest_password
 
 # Supabase
 NEXT_PUBLIC_SUPABASE_URL=https://xxx.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=xxx
 SUPABASE_SERVICE_ROLE_KEY=xxx
 ```
+
+> `AUTH_SECRET` 是 2026-04-20 安全強化後新增的必要欄位。未設定時應用程式會拒絕登入。
 
 ---
 
