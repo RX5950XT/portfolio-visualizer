@@ -22,6 +22,20 @@ interface Props {
   refreshKey?: number;
 }
 
+interface TooltipPayloadItem {
+  value: number;
+}
+
+interface RoundedBarShapeProps {
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+  payload?: {
+    pnl?: number;
+  };
+}
+
 const DAY_OPTIONS = [30, 60, 90, 180] as const;
 
 // 根據天數計算合適的 XAxis 刻度間隔，讓標籤數量維持在 6~8 個左右
@@ -87,7 +101,7 @@ export default function DailyPnLChart({ portfolioId, refreshKey }: Props) {
     label,
   }: {
     active?: boolean;
-    payload?: Array<{ value: number }>;
+    payload?: TooltipPayloadItem[];
     label?: string;
   }) => {
     if (active && payload && payload.length) {
@@ -198,33 +212,30 @@ export default function DailyPnLChart({ portfolioId, refreshKey }: Props) {
             <Tooltip content={<CustomTooltip />} />
             <Bar
               dataKey="pnl"
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              shape={
-                ((props: any) => {
-                  const { x, y, width, height, payload } = props;
-                  const fill = (payload?.pnl ?? 0) >= 0 ? "#22c55e" : "#ef4444";
+              shape={(props: RoundedBarShapeProps) => {
+                const { x = 0, y = 0, width = 0, height = 0, payload } = props;
+                const fill = (payload?.pnl ?? 0) >= 0 ? "#22c55e" : "#ef4444";
 
-                  if (!height || Math.abs(height) < 1) return null;
+                if (Math.abs(height) < 1) return null;
 
-                  // Recharts 傳入的 height 可能為負值（正向柱子往上）
-                  // rect 不支援負 height，需手動校正座標
-                  const rectY = height < 0 ? y + height : y;
-                  const rectH = Math.abs(height);
+                // Recharts 傳入的 height 可能為負值（正向柱子往上）
+                // rect 不支援負 height，需手動校正座標
+                const rectY = height < 0 ? y + height : y;
+                const rectH = Math.abs(height);
 
-                  return (
-                    <rect
-                      x={x}
-                      y={rectY}
-                      width={width}
-                      height={rectH}
-                      fill={fill}
-                      rx={4}
-                      ry={4}
-                    />
-                  );
-                }) as any
-              }
-            ></Bar>
+                return (
+                  <rect
+                    x={x}
+                    y={rectY}
+                    width={width}
+                    height={rectH}
+                    fill={fill}
+                    rx={4}
+                    ry={4}
+                  />
+                );
+              }}
+            />
           </BarChart>
         </ResponsiveContainer>
       </div>

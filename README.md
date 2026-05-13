@@ -87,6 +87,7 @@ SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 1. create_portfolios.sql      # 投資組合表
 2. create_transactions.sql    # 交易紀錄表
 3. add_guest_visibility.sql   # 訪客可見性欄位
+4. 20260513_supabase_data_api_remediation.sql  # 補齊 Data API explicit GRANT、RLS/policy 與缺漏基礎表
 ```
 
 ### 5. 啟動開發伺服器

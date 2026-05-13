@@ -40,3 +40,16 @@ BEGIN
   SET portfolio_id = default_portfolio_id
   WHERE portfolio_id IS NULL;
 END $$;
+
+-- Explicit GRANTs for Data API access (Supabase 2026-05-30 起要求)
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.portfolios TO anon;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.portfolios TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.portfolios TO service_role;
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.holdings TO anon;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.holdings TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.holdings TO service_role;
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.cash_balance TO anon;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.cash_balance TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.cash_balance TO service_role;

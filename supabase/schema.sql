@@ -3,6 +3,15 @@
 -- =============================================
 -- 在 Supabase Dashboard > SQL Editor 中執行此腳本
 
+-- Cash Balance Table（現金餘額）
+CREATE TABLE IF NOT EXISTS cash_balance (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  amount_twd DECIMAL(18, 2) NOT NULL DEFAULT 0,
+  portfolio_id UUID,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- Holdings Table（持股）
 CREATE TABLE IF NOT EXISTS holdings (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -33,15 +42,35 @@ CREATE TABLE IF NOT EXISTS etf_expense_ratios (
 );
 
 -- Indexes
+CREATE INDEX IF NOT EXISTS idx_cash_portfolio ON cash_balance(portfolio_id);
 CREATE INDEX IF NOT EXISTS idx_holdings_symbol ON holdings(symbol);
 CREATE INDEX IF NOT EXISTS idx_snapshots_date ON daily_snapshots(snapshot_date);
 
 -- Enable Row Level Security (但允許所有操作，因為是單用戶應用)
+ALTER TABLE cash_balance ENABLE ROW LEVEL SECURITY;
 ALTER TABLE holdings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE daily_snapshots ENABLE ROW LEVEL SECURITY;
 ALTER TABLE etf_expense_ratios ENABLE ROW LEVEL SECURITY;
 
 -- Create policies to allow all operations (單用戶不需複雜權限)
+CREATE POLICY "Allow all operations on cash_balance" ON cash_balance FOR ALL USING (true);
 CREATE POLICY "Allow all operations on holdings" ON holdings FOR ALL USING (true);
 CREATE POLICY "Allow all operations on daily_snapshots" ON daily_snapshots FOR ALL USING (true);
 CREATE POLICY "Allow all operations on etf_expense_ratios" ON etf_expense_ratios FOR ALL USING (true);
+
+-- Explicit GRANTs for Data API access (Supabase 2026-05-30 起要求)
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.cash_balance TO anon;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.cash_balance TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.cash_balance TO service_role;
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.holdings TO anon;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.holdings TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.holdings TO service_role;
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.daily_snapshots TO anon;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.daily_snapshots TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.daily_snapshots TO service_role;
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.etf_expense_ratios TO anon;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.etf_expense_ratios TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.etf_expense_ratios TO service_role;

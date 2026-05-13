@@ -25,3 +25,8 @@ CREATE INDEX IF NOT EXISTS idx_transactions_portfolio ON transactions(portfolio_
 -- Enable RLS
 ALTER TABLE transactions ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Allow all operations on transactions" ON transactions FOR ALL USING (true);
+
+-- Explicit GRANTs for Data API access (Supabase 2026-05-30 起要求)
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.transactions TO anon;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.transactions TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.transactions TO service_role;

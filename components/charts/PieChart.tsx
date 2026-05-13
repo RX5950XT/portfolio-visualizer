@@ -8,6 +8,13 @@ interface Props {
   cashBalance?: number;
 }
 
+interface PieTooltipPayloadItem {
+  payload: {
+    name: string;
+    value: number;
+  };
+}
+
 const COLORS = [
   "#3b82f6",
   "#22c55e",
@@ -22,6 +29,32 @@ const COLORS = [
 ];
 
 const CASH_COLOR = "#6b7280";
+
+function CustomTooltip({
+  active,
+  payload,
+  total,
+}: {
+  active?: boolean;
+  payload?: PieTooltipPayloadItem[];
+  total: number;
+}) {
+  if (active && payload && payload.length) {
+    const item = payload[0].payload;
+    const percent = ((item.value / total) * 100).toFixed(1);
+    return (
+      <div className="bg-card border border-border rounded-lg p-3 shadow-lg">
+        <p className="font-semibold">{item.name}</p>
+        <p className="text-muted text-sm">
+          NT$ {item.value.toLocaleString("zh-TW", { maximumFractionDigits: 0 })}
+        </p>
+        <p className="text-muted text-sm">{percent}%</p>
+      </div>
+    );
+  }
+
+  return null;
+}
 
 export default function PortfolioPieChart({
   holdings,
@@ -46,30 +79,6 @@ export default function PortfolioPieChart({
 
   // 依權重由高到低排序（圖表和 Legend 共用同一份排序後資料）
   const sortedData = [...data].sort((a, b) => b.value - a.value);
-
-  const CustomTooltip = ({
-    active,
-    payload,
-  }: {
-    active?: boolean;
-    payload?: Array<{ payload: (typeof data)[0] }>;
-  }) => {
-    if (active && payload && payload.length) {
-      const item = payload[0].payload;
-      const percent = ((item.value / total) * 100).toFixed(1);
-      return (
-        <div className="bg-card border border-border rounded-lg p-3 shadow-lg">
-          <p className="font-semibold">{item.name}</p>
-          <p className="text-muted text-sm">
-            NT${" "}
-            {item.value.toLocaleString("zh-TW", { maximumFractionDigits: 0 })}
-          </p>
-          <p className="text-muted text-sm">{percent}%</p>
-        </div>
-      );
-    }
-    return null;
-  };
 
   if (data.length === 0) {
     return (
@@ -98,7 +107,7 @@ export default function PortfolioPieChart({
                 <Cell key={`cell-${index}`} fill={entry.color} />
               ))}
             </Pie>
-            <Tooltip content={<CustomTooltip />} />
+            <Tooltip content={<CustomTooltip total={total} />} />
           </PieChart>
         </ResponsiveContainer>
       </div>

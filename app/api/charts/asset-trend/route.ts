@@ -97,7 +97,7 @@ export async function GET(request: Request) {
 
     // 計算每日市值 + 成本
     const chartData: ChartDataPoint[] = [];
-    let lastKnownPrices: Map<string, number> = new Map();
+    const lastKnownPrices: Map<string, number> = new Map();
 
     for (const date of dateList) {
       let dailyValue = 0;
