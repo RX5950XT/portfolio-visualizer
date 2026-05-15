@@ -133,14 +133,14 @@ export async function POST(request: Request) {
     const remainingShares = currentShares - sellSharesNum;
 
     if (remainingShares <= 0.00000001) {
-      // 全部賣出，刪除持股
-      const { error: deleteError } = await supabase
+      // 全數賣出：軟刪除（shares=0 保留 row），供歷史圖表重建持股量；儀表板清單以 shares>0 過濾
+      const { error: updateError } = await supabase
         .from('holdings')
-        .delete()
+        .update({ shares: 0, updated_at: new Date().toISOString() })
         .eq('id', holding_id);
 
-      if (deleteError) {
-        console.error('刪除持股失敗:', deleteError);
+      if (updateError) {
+        console.error('更新持股失敗:', updateError);
         return NextResponse.json({ error: '更新持股失敗' }, { status: 500 });
       }
     } else {

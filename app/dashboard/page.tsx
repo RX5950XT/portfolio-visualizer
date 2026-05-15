@@ -221,15 +221,13 @@ export default function DashboardPage() {
       return;
     }
 
-    // 逐一取得報價（確保格式一致）
-    let totalCost = 0;
-    let totalValue = 0;
-    let etfTotalValue = 0;
-    let etfWeightedSum = 0;
-
+    // 並行取得報價與 ETF 費用率
     const enrichedHoldings: HoldingWithQuote[] = await Promise.all(
       holdingsData.map(async (holding) => {
-        const quote = await fetchSingleQuote(holding.symbol);
+        const [quote, expenseRatio] = await Promise.all([
+          fetchSingleQuote(holding.symbol),
+          fetchExpenseRatio(holding.symbol),
+        ]);
 
         const currentPrice = quote?.price || 0;
         const costPerShare = Number(holding.cost_price);
@@ -246,20 +244,6 @@ export default function DashboardPage() {
         const valueTWD = isUS ? currentValue * rate : currentValue;
         const gainTWD = valueTWD - costTWD;
 
-        totalCost += costTWD;
-        totalValue += valueTWD;
-
-        // 由 API 自動判斷是否為 ETF 並取得費用率
-        let expenseRatio = null;
-        const expenseData = await fetchExpenseRatio(holding.symbol);
-        if (expenseData !== null) {
-          expenseRatio = expenseData;
-          if (valueTWD > 0) {
-            etfTotalValue += valueTWD;
-            etfWeightedSum += valueTWD * expenseRatio;
-          }
-        }
-
         return {
           ...holding,
           shares,
@@ -273,6 +257,19 @@ export default function DashboardPage() {
           expenseRatio,
         };
       }),
+    );
+
+    // 計算總額（reduce 取代 async map 內的累加，避免在並行 callback 內 mutate 共用變數）
+    const { totalCost, totalValue, etfWeightedSum } = enrichedHoldings.reduce(
+      (acc, h) => {
+        acc.totalCost += h.totalCostTWD || 0;
+        acc.totalValue += h.currentValue || 0;
+        if (h.expenseRatio != null && (h.currentValue || 0) > 0) {
+          acc.etfWeightedSum += (h.currentValue || 0) * h.expenseRatio;
+        }
+        return acc;
+      },
+      { totalCost: 0, totalValue: 0, etfWeightedSum: 0 }
     );
 
     setHoldings(enrichedHoldings);

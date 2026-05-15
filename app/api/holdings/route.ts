@@ -34,6 +34,7 @@ export async function GET(request: Request) {
     let query = supabase
       .from('holdings')
       .select('*')
+      .gt('shares', 0)
       .order('created_at', { ascending: false });
 
     if (portfolioId) {

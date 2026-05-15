@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase';
 import { getUserRole, getVisiblePortfolioIdsForRole } from '@/lib/auth';
-import { fetchHistory, fetchExchangeRate } from '@/lib/stocks';
+import { fetchHistory } from '@/lib/stocks';
+import { fetchFxHistory, buildDenseRateMap, makeSharesResolver } from '@/lib/portfolio-history';
 
 interface Holding {
   id: string;
@@ -14,10 +15,10 @@ interface Holding {
 
 interface DailyPnLPoint {
   date: string;
-  pnl: number; // 當日損益（價格變動 × 股數）
+  pnl: number;
 }
 
-// GET: 取得每日損益資料（最近 7 天）
+// GET: 取得每日損益資料
 export async function GET(request: Request) {
   try {
     const role = await getUserRole();
@@ -36,108 +37,103 @@ export async function GET(request: Request) {
 
     const supabase = createServerClient();
 
+    // 不加 shares>0 過濾，需要含軟刪除的 lot 來重建歷史持股量
     let query = supabase.from('holdings').select('*');
-
     if (portfolioId) {
       query = query.eq('portfolio_id', portfolioId);
     } else if (visibleIds !== null) {
-      if (visibleIds.length === 0) {
-        return NextResponse.json({ data: [] });
-      }
+      if (visibleIds.length === 0) return NextResponse.json({ data: [] });
       query = query.in('portfolio_id', visibleIds);
     }
 
     const { data: holdings, error } = await query;
-
     if (error) {
       console.error('取得持股失敗:', error);
       return NextResponse.json({ error: '取得持股失敗' }, { status: 500 });
     }
+    if (!holdings || holdings.length === 0) return NextResponse.json({ data: [] });
 
-    if (!holdings || holdings.length === 0) {
-      return NextResponse.json({ data: [] });
-    }
-
-    // 取得當前匯率
-    const exchangeRate = (await fetchExchangeRate()) || 32;
-
-    // 計算查詢的日期範圍（多抓一天用於計算差值）
     const endDate = new Date();
     const startDate = new Date();
-    // 多抓 2.5 倍日曆天，確保涵蓋足夠交易日（排除週末、假日）
+    // 多抓 2.5 倍日曆天，確保涵蓋足夠交易日
     startDate.setDate(startDate.getDate() - Math.ceil(days * 2.5));
+    const startDateStr = startDate.toISOString().split('T')[0];
+    const endDateStr = endDate.toISOString().split('T')[0];
 
-    // 取得所有持股的歷史股價
-    const historyMap = new Map<string, { date: string; close: number }[]>();
+    const holdingIds = holdings.map((h: Holding) => h.id);
 
-    await Promise.all(
-      holdings.map(async (holding: Holding) => {
-        const history = await fetchHistory(holding.symbol, {
-          startDate: startDate.toISOString().split('T')[0],
-          endDate: endDate.toISOString().split('T')[0],
-        });
-        historyMap.set(holding.symbol, history);
-      })
-    );
+    // 並行取得：各標的歷史股價 + 歷史匯率 + 賣出交易
+    const [historyResults, fxSparse, sellsResult] = await Promise.all([
+      Promise.all(
+        holdings.map(async (h: Holding) => {
+          const history = await fetchHistory(h.symbol, { startDate: startDateStr, endDate: endDateStr });
+          const priceMap = new Map<string, number>();
+          history.forEach((p) => priceMap.set(p.date, p.close));
+          return { symbol: h.symbol, priceMap };
+        })
+      ),
+      fetchFxHistory(startDateStr),
+      supabase
+        .from('transactions')
+        .select('holding_id, shares, transaction_date')
+        .in('holding_id', holdingIds)
+        .eq('type', 'sell'),
+    ]);
 
-    // 產生日期序列（最近 N 天）
-    const dateList: string[] = [];
-    const calendarDays = Math.ceil(days * 2.5);
-    for (let i = calendarDays; i >= 0; i--) {
-      const d = new Date();
-      d.setDate(d.getDate() - i);
-      dateList.push(d.toISOString().split('T')[0]);
+    // 合併同 symbol 的 priceMap（同標的多個 lot 共用同一份歷史）
+    const symbolPriceMap = new Map<string, Map<string, number>>();
+    for (const { symbol, priceMap } of historyResults) {
+      if (!symbolPriceMap.has(symbol)) {
+        symbolPriceMap.set(symbol, priceMap);
+      } else {
+        for (const [date, price] of priceMap) {
+          symbolPriceMap.get(symbol)!.set(date, price);
+        }
+      }
     }
 
-    // 計算每日損益
+    // 交易日聯集：任何 symbol 有資料的日期都算交易日，按日期升序排列
+    const tradingDateSet = new Set<string>();
+    for (const [, pm] of symbolPriceMap) {
+      for (const date of pm.keys()) tradingDateSet.add(date);
+    }
+    const tradingDates = [...tradingDateSet].sort();
+
+    // 每日匯率（forward-fill 補缺口）
+    const denseRateMap = buildDenseRateMap(fxSparse, tradingDates);
+    const getSharesAtDate = makeSharesResolver(sellsResult.data || []);
+
+    // 以相鄰「交易日」為單位計算損益（自動涵蓋週一←→上個 Friday，不再丟資料）
     const pnlData: DailyPnLPoint[] = [];
 
-    for (let i = 1; i < dateList.length; i++) {
-      const today = dateList[i];
-      const yesterday = dateList[i - 1];
+    for (let i = 1; i < tradingDates.length; i++) {
+      const today = tradingDates[i];
+      const yesterday = tradingDates[i - 1];
       let dailyPnL = 0;
 
       for (const holding of holdings as Holding[]) {
-        // 只計算已買入的持股
-        if (holding.purchase_date > today) {
-          continue;
-        }
+        const shares = getSharesAtDate(holding, today);
+        if (shares <= 0) continue;
 
-        const history = historyMap.get(holding.symbol) || [];
-        const todayData = history.find((h) => h.date === today);
-        const yesterdayData = history.find((h) => h.date === yesterday);
+        const pm = symbolPriceMap.get(holding.symbol);
+        const todayPrice = pm?.get(today);
+        const yesterdayPrice = pm?.get(yesterday);
 
-        // 如果有今天和昨天的價格，計算價格變動
-        if (todayData && yesterdayData) {
-          const priceChange = todayData.close - yesterdayData.close;
-          const shares = Number(holding.shares);
+        if (todayPrice !== undefined && yesterdayPrice !== undefined) {
+          const priceChange = todayPrice - yesterdayPrice;
           let pnl = priceChange * shares;
-
-          // 美股轉換為 TWD
           if (holding.market === 'US') {
-            pnl *= exchangeRate;
+            pnl *= denseRateMap.get(today) ?? 32;
           }
-
           dailyPnL += pnl;
         }
       }
 
-      // 只加入交易日（有資料的日期）
-      // 檢查是否有任何持股在這天有價格變動資料
-      const hasData = holdings.some((holding: Holding) => {
-        const history = historyMap.get(holding.symbol) || [];
-        return history.some((h) => h.date === today);
-      });
-
-      if (hasData && dailyPnL !== 0) {
-        pnlData.push({
-          date: today,
-          pnl: Math.round(dailyPnL),
-        });
+      if (dailyPnL !== 0) {
+        pnlData.push({ date: today, pnl: Math.round(dailyPnL) });
       }
     }
 
-    // 只回傳最近 N 個交易日
     return NextResponse.json({ data: pnlData.slice(-days) });
   } catch (err) {
     console.error('計算每日損益失敗:', err);
