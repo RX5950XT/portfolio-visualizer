@@ -17,6 +17,7 @@ interface ChartDataPoint {
   date: string;
   value: number;
   cost: number;
+  benchmark: number;
 }
 
 interface Props {
@@ -28,6 +29,8 @@ export default function AssetTrendChart({ portfolioId, refreshKey }: Props) {
   const [data, setData] = useState<ChartDataPoint[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // S&P 500 對照線開關，預設開啟（功能目的即為對比大盤，使用者可隨時關閉）
+  const [showBenchmark, setShowBenchmark] = useState(true);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -88,11 +91,19 @@ export default function AssetTrendChart({ portfolioId, refreshKey }: Props) {
     if (active && payload && payload.length) {
       const valueEntry = payload.find(p => p.dataKey === 'value');
       const costEntry = payload.find(p => p.dataKey === 'cost');
+      const benchmarkEntry = payload.find(p => p.dataKey === 'benchmark');
       const marketValue = valueEntry?.value || 0;
       const costBasis = costEntry?.value || 0;
       const pnl = marketValue - costBasis;
       const pnlPercent = costBasis > 0 ? ((pnl / costBasis) * 100).toFixed(2) : '0.00';
       const isPositive = pnl >= 0;
+
+      // S&P 500 對照：同樣本金的報酬%，方便直接與藍線損益% 對比
+      const benchmarkValue = benchmarkEntry?.value;
+      const spPnlPercent = costBasis > 0 && benchmarkValue !== undefined
+        ? (((benchmarkValue - costBasis) / costBasis) * 100).toFixed(2)
+        : null;
+      const spIsPositive = (spPnlPercent ? Number(spPnlPercent) : 0) >= 0;
 
       return (
         <div className="bg-card border border-border rounded-lg p-3 shadow-lg">
@@ -106,6 +117,12 @@ export default function AssetTrendChart({ portfolioId, refreshKey }: Props) {
           <p className={`text-sm font-medium mt-1 ${isPositive ? 'text-up' : 'text-down'}`}>
             損益: {isPositive ? '+' : ''}NT$ {pnl.toLocaleString('zh-TW')} ({isPositive ? '+' : ''}{pnlPercent}%)
           </p>
+          {benchmarkValue !== undefined && (
+            <p className="text-sm mt-1" style={{ color: '#ffffff' }}>
+              S&amp;P 500: NT$ {benchmarkValue.toLocaleString('zh-TW')}
+              {spPnlPercent !== null && ` (${spIsPositive ? '+' : ''}${spPnlPercent}%)`}
+            </p>
+          )}
         </div>
       );
     }
@@ -136,8 +153,10 @@ export default function AssetTrendChart({ portfolioId, refreshKey }: Props) {
     );
   }
 
-  // Y 軸範圍：取兩條線的聯合 min/max
-  const allValues = data.flatMap((d) => [d.value, d.cost]);
+  // Y 軸範圍：取顯示中各線的聯合 min/max（白線開啟時納入 benchmark）
+  const allValues = data.flatMap((d) =>
+    showBenchmark ? [d.value, d.cost, d.benchmark] : [d.value, d.cost]
+  );
   const minValue = Math.min(...allValues);
   const maxValue = Math.max(...allValues);
   const padding = (maxValue - minValue) * 0.1 || maxValue * 0.1;
@@ -145,8 +164,26 @@ export default function AssetTrendChart({ portfolioId, refreshKey }: Props) {
   const yMax = Math.ceil((maxValue + padding) / 10000) * 10000;
 
   return (
-    <div className="h-full">
-      <ResponsiveContainer width="100%" height="100%">
+    <div className="h-full flex flex-col">
+      {/* S&P 500 對照線開關 */}
+      <div className="mb-2 flex items-center gap-1">
+        <button
+          onClick={() => setShowBenchmark((v) => !v)}
+          className={`px-2.5 py-1 text-xs rounded-full font-medium transition-colors flex items-center gap-1.5 ${
+            showBenchmark
+              ? 'bg-primary text-white'
+              : 'bg-border/50 text-muted hover:text-foreground hover:bg-border'
+          }`}
+        >
+          <span
+            className="inline-block w-2.5 h-2.5 rounded-full"
+            style={{ backgroundColor: '#ffffff', opacity: showBenchmark ? 1 : 0.4 }}
+          />
+          S&amp;P 500 對照
+        </button>
+      </div>
+      <div className="flex-1 min-h-0">
+        <ResponsiveContainer width="100%" height="100%">
         <LineChart
           data={data}
           margin={{ top: 5, right: 20, left: 10, bottom: 5 }}
@@ -171,7 +208,9 @@ export default function AssetTrendChart({ portfolioId, refreshKey }: Props) {
           />
           <Tooltip content={<CustomTooltip />} />
           <Legend
-            formatter={(value: string) => value === 'value' ? '市值' : '成本'}
+            formatter={(value: string) =>
+              value === 'value' ? '市值' : value === 'cost' ? '成本' : 'S&P 500'
+            }
             wrapperStyle={{ fontSize: 12, color: '#999' }}
           />
           {/* 成本線：灰色虛線 */}
@@ -184,6 +223,17 @@ export default function AssetTrendChart({ portfolioId, refreshKey }: Props) {
             dot={false}
             activeDot={{ r: 3, fill: '#6b7280' }}
           />
+          {/* S&P 500 對照線：白色實線 */}
+          {showBenchmark && (
+            <Line
+              type="monotone"
+              dataKey="benchmark"
+              stroke="#ffffff"
+              strokeWidth={2}
+              dot={false}
+              activeDot={{ r: 4, fill: '#ffffff' }}
+            />
+          )}
           {/* 市值線：藍色實線 */}
           <Line
             type="monotone"
@@ -194,7 +244,8 @@ export default function AssetTrendChart({ portfolioId, refreshKey }: Props) {
             activeDot={{ r: 4, fill: '#3b82f6' }}
           />
         </LineChart>
-      </ResponsiveContainer>
+        </ResponsiveContainer>
+      </div>
     </div>
   );
 }

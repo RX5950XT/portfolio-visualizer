@@ -17,6 +17,7 @@ interface ChartDataPoint {
   date: string;
   value: number;
   cost: number;
+  benchmark: number;
 }
 
 // GET: 取得資產走勢資料（市值線 + 成本線）
@@ -64,8 +65,8 @@ export async function GET(request: Request) {
 
     const holdingIds = holdings.map((h: Holding) => h.id);
 
-    // 並行取得：各標的歷史股價 + 歷史匯率 + 賣出交易（用於重建歷史持股量）
-    const [historyResults, fxSparse, sellsResult] = await Promise.all([
+    // 並行取得：各標的歷史股價 + 歷史匯率 + S&P 500 對照價格 + 賣出交易（用於重建歷史持股量）
+    const [historyResults, fxSparse, spHistory, sellsResult] = await Promise.all([
       Promise.all(
         holdings.map(async (h: Holding) => {
           const history = await fetchHistory(h.symbol, { startDate: earliestDate });
@@ -75,12 +76,16 @@ export async function GET(request: Request) {
         })
       ),
       fetchFxHistory(earliestDate),
+      fetchHistory('^GSPC', { startDate: earliestDate }),
       supabase
         .from('transactions')
         .select('holding_id, shares, transaction_date')
         .in('holding_id', holdingIds)
         .eq('type', 'sell'),
     ]);
+
+    const spSparse = new Map<string, number>();
+    for (const p of spHistory) spSparse.set(p.date, p.close);
 
     const historyMap = new Map<string, Map<string, number>>();
     for (const { symbol, priceMap } of historyResults) {
@@ -103,17 +108,38 @@ export async function GET(request: Request) {
       dateList.push(d.toISOString().split('T')[0]);
     }
 
-    // 每日匯率（逐日，forward-fill 補非交易日）
+    // 每日匯率與 S&P 500 價格（逐日，forward/back-fill 補非交易日）
     const denseRateMap = buildDenseRateMap(fxSparse, dateList);
+    const spDense = buildDenseRateMap(spSparse, dateList);
 
-    // 計算每日市值 + 成本
+    // 預計算每筆 lot 的 benchmark 基準：當初投入的 TWD 改買 ^GSPC 能換到多少「股」
+    // spPrice 為 USD，故 TWD 投入需先用買入日匯率換成 USD 再除價；缺價/匯率時該 lot 視為 0（不污染整條線）
+    const spSharesByLot = new Map<string, number>();
+    for (const holding of holdings as Holding[]) {
+      const originalShares = getSharesAtDate(holding, holding.purchase_date);
+      const isUS = holding.market === 'US';
+      const fxAtPurchase = denseRateMap.get(holding.purchase_date) ?? 0;
+      const spPriceAtPurchase = spDense.get(holding.purchase_date) ?? 0;
+      const contributionTwd = originalShares * Number(holding.cost_price) * (isUS ? fxAtPurchase : 1);
+      const denom = spPriceAtPurchase * fxAtPurchase;
+      const spSharesFull = denom > 0 && originalShares > 0 ? contributionTwd / denom : 0;
+      // 存「每原始股對應的 S&P 股數」，每日再乘上當日持股比例
+      spSharesByLot.set(holding.id, originalShares > 0 ? spSharesFull / originalShares : 0);
+    }
+
+    // 計算每日市值 + 成本 + S&P 500 對照值
     const chartData: ChartDataPoint[] = [];
     const lastKnownPrices = new Map<string, number>();
 
     for (const date of dateList) {
       let dailyValue = 0;
       let dailyCost = 0;
+      let dailyBenchmark = 0;
       let hasAnyHolding = false;
+
+      // S&P 對照：當日 ^GSPC 價格（USD）× 當日匯率，全持股共用
+      const spPrice = spDense.get(date) ?? 0;
+      const spRate = denseRateMap.get(date) ?? 32;
 
       for (const holding of holdings as Holding[]) {
         const shares = getSharesAtDate(holding, date);
@@ -137,10 +163,19 @@ export async function GET(request: Request) {
         if (price) {
           dailyValue += isUS ? shares * price * rate : shares * price;
         }
+
+        // 比照賣出：用當日持股 shares 等比例縮放，與市值線同步
+        const spPerShare = spSharesByLot.get(holding.id) ?? 0;
+        dailyBenchmark += spPerShare * shares * spPrice * spRate;
       }
 
       if (hasAnyHolding && dailyValue > 0) {
-        chartData.push({ date, value: Math.round(dailyValue), cost: Math.round(dailyCost) });
+        chartData.push({
+          date,
+          value: Math.round(dailyValue),
+          cost: Math.round(dailyCost),
+          benchmark: Math.round(dailyBenchmark),
+        });
       }
     }
 
