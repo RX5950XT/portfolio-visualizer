@@ -44,3 +44,7 @@ next-env.d.ts
 
 # local docs (not committed to repo)
 /docs
+
+# AI 工作產物（本機交接/規劃，不進 repo）
+/tasks
+/CONTEXT.md

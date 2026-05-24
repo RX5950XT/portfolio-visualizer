@@ -1,15 +1,61 @@
 'use client';
 
-import { TrendingUp, TrendingDown, Trash2 } from 'lucide-react';
+import { TrendingUp, TrendingDown, Trash2, Pencil } from 'lucide-react';
 import type { Transaction } from '@/types';
 
 interface Props {
   transactions: Transaction[];
-  onDelete?: (tx: Transaction) => void;
+  onDelete?: (ids: string[], symbol: string) => void;
+  onEditNotes?: (ids: string[], symbol: string, currentNotes: string | null) => void;
   readOnly?: boolean;
 }
 
-export default function TransactionList({ transactions, onDelete, readOnly = false }: Props) {
+// 一次賣出可能被 pro-rata 拆成多筆 tx（每批次一筆），顯示層聚合回單次賣出
+interface SaleGroup {
+  key: string;
+  ids: string[];
+  symbol: string;
+  market: 'US' | 'TW';
+  transaction_date: string;
+  price: number;
+  shares: number;
+  realizedPnl: number | null;
+  notes: string | null;
+}
+
+// 同 (日期, 標的, 市場, 成交價, created_at) 視為同一次賣出；
+// pro-rata 多筆 tx 在單一 insert 內寫入 → created_at 相同 → 聚合為一組
+function groupSales(transactions: Transaction[]): SaleGroup[] {
+  const map = new Map<string, SaleGroup>();
+  for (const tx of transactions) {
+    const key = `${tx.transaction_date}|${tx.symbol}|${tx.market}|${tx.price}|${tx.created_at}`;
+    const existing = map.get(key);
+    if (existing) {
+      existing.ids.push(tx.id);
+      existing.shares += Number(tx.shares);
+      if (tx.realized_pnl_twd != null) {
+        existing.realizedPnl = (existing.realizedPnl ?? 0) + tx.realized_pnl_twd;
+      }
+    } else {
+      map.set(key, {
+        key,
+        ids: [tx.id],
+        symbol: tx.symbol,
+        market: tx.market,
+        transaction_date: tx.transaction_date,
+        price: Number(tx.price),
+        shares: Number(tx.shares),
+        realizedPnl: tx.realized_pnl_twd ?? null,
+        notes: tx.notes,
+      });
+    }
+  }
+  return [...map.values()];
+}
+
+export default function TransactionList({ transactions, onDelete, onEditNotes, readOnly = false }: Props) {
+  const showActions = !readOnly && Boolean(onDelete || onEditNotes);
+
   if (transactions.length === 0) {
     return (
       <div className="text-center py-12 text-muted">
@@ -17,6 +63,8 @@ export default function TransactionList({ transactions, onDelete, readOnly = fal
       </div>
     );
   }
+
+  const groups = groupSales(transactions);
 
   const formatCurrency = (value: number, currency = 'TWD'): string => {
     if (value === null || value === undefined || isNaN(value)) return '—';
@@ -51,30 +99,30 @@ export default function TransactionList({ transactions, onDelete, readOnly = fal
             <th className="pb-3 font-medium text-right w-[120px]">成交金額</th>
             <th className="pb-3 font-medium text-right w-[150px]">已實現損益</th>
             <th className="pb-3 font-medium w-[120px] pl-6">備註</th>
-            {!readOnly && onDelete && (
-              <th className="pb-3 font-medium text-center w-[60px]">操作</th>
+            {showActions && (
+              <th className="pb-3 font-medium text-center w-[90px]">操作</th>
             )}
           </tr>
         </thead>
         <tbody>
-          {transactions.map((tx) => {
-            const currency = tx.market === 'US' ? 'USD' : 'TWD';
-            const amount = tx.shares * tx.price;
-            const pnl = tx.realized_pnl_twd;
+          {groups.map((g) => {
+            const currency = g.market === 'US' ? 'USD' : 'TWD';
+            const amount = g.shares * g.price;
+            const pnl = g.realizedPnl;
 
             return (
-              <tr key={tx.id} className="border-b border-border hover:bg-card/50 transition-colors">
-                <td className="py-3 text-sm">{formatDate(tx.transaction_date)}</td>
+              <tr key={g.key} className="border-b border-border hover:bg-card/50 transition-colors">
+                <td className="py-3 text-sm">{formatDate(g.transaction_date)}</td>
                 <td className="py-3">
                   <div className="flex items-center gap-2">
-                    <span className="font-medium">{tx.symbol}</span>
+                    <span className="font-medium">{g.symbol}</span>
                     <span className="text-xs px-1.5 py-0.5 rounded bg-border text-muted">
-                      {tx.market}
+                      {g.market}
                     </span>
                   </div>
                 </td>
-                <td className="py-3 text-right">{Number(tx.shares).toLocaleString()}</td>
-                <td className="py-3 text-right">{formatCurrency(Number(tx.price), currency)}</td>
+                <td className="py-3 text-right">{g.shares.toLocaleString()}</td>
+                <td className="py-3 text-right">{formatCurrency(g.price, currency)}</td>
                 <td className="py-3 text-right">{formatCurrency(amount, currency)}</td>
                 <td className="py-3 text-right">
                   {pnl !== null && pnl !== undefined ? (
@@ -88,16 +136,29 @@ export default function TransactionList({ transactions, onDelete, readOnly = fal
                     <span className="text-muted">—</span>
                   )}
                 </td>
-                <td className="py-3 text-sm text-muted pl-6 truncate">{tx.notes || '—'}</td>
-                {!readOnly && onDelete && (
-                  <td className="py-3 text-center">
-                    <button
-                      onClick={() => onDelete(tx)}
-                      className="p-1.5 rounded hover:bg-border transition-colors text-danger"
-                      title="刪除紀錄"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                <td className="py-3 text-sm text-muted pl-6 truncate">{g.notes || '—'}</td>
+                {showActions && (
+                  <td className="py-3">
+                    <div className="flex items-center justify-center gap-1">
+                      {onEditNotes && (
+                        <button
+                          onClick={() => onEditNotes(g.ids, g.symbol, g.notes)}
+                          className="p-1.5 rounded hover:bg-border transition-colors text-muted hover:text-foreground"
+                          title="編輯備註"
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </button>
+                      )}
+                      {onDelete && (
+                        <button
+                          onClick={() => onDelete(g.ids, g.symbol)}
+                          className="p-1.5 rounded hover:bg-border transition-colors text-danger"
+                          title="刪除紀錄"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
                   </td>
                 )}
               </tr>
@@ -108,22 +169,22 @@ export default function TransactionList({ transactions, onDelete, readOnly = fal
 
       {/* 手機版卡片 */}
       <div className="md:hidden space-y-3">
-        {transactions.map((tx) => {
-          const currency = tx.market === 'US' ? 'USD' : 'TWD';
-          const pnl = tx.realized_pnl_twd;
+        {groups.map((g) => {
+          const currency = g.market === 'US' ? 'USD' : 'TWD';
+          const pnl = g.realizedPnl;
 
           return (
-            <div key={tx.id} className="p-4 rounded-lg bg-card/50 border border-border">
+            <div key={g.key} className="p-4 rounded-lg bg-card/50 border border-border">
               <div className="flex items-start justify-between mb-2">
                 <div>
                   <div className="flex items-center gap-2">
-                    <span className="font-medium">{tx.symbol}</span>
+                    <span className="font-medium">{g.symbol}</span>
                     <span className="text-xs px-1.5 py-0.5 rounded bg-border text-muted">
-                      {tx.market}
+                      {g.market}
                     </span>
                   </div>
                   <p className="text-sm text-muted mt-1">
-                    {formatDate(tx.transaction_date)}
+                    {formatDate(g.transaction_date)}
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
@@ -137,20 +198,33 @@ export default function TransactionList({ transactions, onDelete, readOnly = fal
                       </div>
                     </div>
                   )}
-                  {!readOnly && onDelete && (
-                    <button
-                      onClick={() => onDelete(tx)}
-                      className="p-1 rounded hover:bg-border text-danger"
-                      title="刪除紀錄"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                  {showActions && (
+                    <>
+                      {onEditNotes && (
+                        <button
+                          onClick={() => onEditNotes(g.ids, g.symbol, g.notes)}
+                          className="p-1 rounded hover:bg-border text-muted hover:text-foreground"
+                          title="編輯備註"
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </button>
+                      )}
+                      {onDelete && (
+                        <button
+                          onClick={() => onDelete(g.ids, g.symbol)}
+                          className="p-1 rounded hover:bg-border text-danger"
+                          title="刪除紀錄"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
+                    </>
                   )}
                 </div>
               </div>
               <div className="text-sm text-muted space-y-0.5">
-                <p>{Number(tx.shares).toLocaleString()} 股 @ {formatCurrency(Number(tx.price), currency)}</p>
-                {tx.notes && <p className="text-xs">備註：{tx.notes}</p>}
+                <p>{g.shares.toLocaleString()} 股 @ {formatCurrency(g.price, currency)}</p>
+                {g.notes && <p className="text-xs">備註：{g.notes}</p>}
               </div>
             </div>
           );

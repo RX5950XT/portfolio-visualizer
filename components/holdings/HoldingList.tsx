@@ -10,7 +10,7 @@ interface Props {
   totalValue: number;
   onEdit: (holding: HoldingWithQuote) => void;
   onDelete: (holding: HoldingWithQuote) => void;
-  onSell?: (holding: HoldingWithQuote) => void;
+  onSell?: (holding: AggregatedHolding) => void;
   readOnly?: boolean;
 }
 
@@ -166,7 +166,7 @@ export default function HoldingList({ holdings, exchangeRate, totalValue, onEdit
                       <div className="flex items-center justify-end gap-1">
                         {onSell && (
                           <button
-                            onClick={(e) => { e.stopPropagation(); onSell(holding as unknown as HoldingWithQuote); }}
+                            onClick={(e) => { e.stopPropagation(); onSell(holding); }}
                             className="p-1.5 rounded hover:bg-border transition-colors text-yellow-500"
                             title="賣出"
                           >
@@ -344,11 +344,6 @@ export default function HoldingList({ holdings, exchangeRate, totalValue, onEdit
                           </span>
                           {!readOnly && (
                             <>
-                              {onSell && (
-                                <button onClick={() => onSell(lot)} className="p-1 rounded hover:bg-border text-yellow-500" title="賣出">
-                                  <ArrowRightLeft className="w-3 h-3" />
-                                </button>
-                              )}
                               <button onClick={() => onEdit(lot)} className="p-1 rounded hover:bg-border" title="編輯">
                                 <Pencil className="w-3 h-3" />
                               </button>
@@ -364,6 +359,19 @@ export default function HoldingList({ holdings, exchangeRate, totalValue, onEdit
                 </div>
               )}
 
+              {/* 多批次：賣出視為一體，僅在聚合層級提供賣出 */}
+              {hasMultipleLots && !readOnly && onSell && (
+                <div className="flex justify-end pt-2 mt-2 border-t border-border">
+                  <button
+                    onClick={() => onSell(holding)}
+                    className="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-yellow-500/40 text-yellow-500 hover:bg-yellow-500/10 transition-colors text-sm"
+                    title="賣出"
+                  >
+                    <ArrowRightLeft className="w-4 h-4" /> 賣出
+                  </button>
+                </div>
+              )}
+
               {/* 單一 lot 操作按鈕 */}
               {!hasMultipleLots && (
                 <div className="flex items-center justify-between pt-2 border-t border-border">
@@ -376,7 +384,7 @@ export default function HoldingList({ holdings, exchangeRate, totalValue, onEdit
                   {!readOnly && (
                     <div className="flex items-center gap-2 ml-auto">
                       {onSell && (
-                        <button onClick={() => onSell(holding.lots[0])} className="p-1.5 rounded hover:bg-border transition-colors text-yellow-500" title="賣出">
+                        <button onClick={() => onSell(holding)} className="p-1.5 rounded hover:bg-border transition-colors text-yellow-500" title="賣出">
                           <ArrowRightLeft className="w-4 h-4" />
                         </button>
                       )}

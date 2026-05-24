@@ -38,24 +38,47 @@ interface RoundedBarShapeProps {
 
 const DAY_OPTIONS = [30, 60, 90, 180] as const;
 
-// 根據天數計算合適的 XAxis 刻度間隔，讓標籤數量維持在 6~8 個左右
-function xAxisInterval(days: number): number {
-  return Math.max(1, Math.floor(days / 6) - 1);
+// 依資料點數計算合適的 XAxis 刻度間隔，讓標籤數量維持在 6~8 個左右
+function xAxisInterval(count: number): number {
+  return Math.max(0, Math.floor(count / 6) - 1);
+}
+
+function toDateStr(d: Date): string {
+  return d.toISOString().split("T")[0];
 }
 
 export default function DailyPnLChart({ portfolioId, refreshKey }: Props) {
   const [data, setData] = useState<DailyPnLPoint[]>([]);
   const [days, setDays] = useState<number>(30);
+  const [mode, setMode] = useState<"preset" | "custom">("preset");
+  const today = toDateStr(new Date());
+  const [customStart, setCustomStart] = useState<string>(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 30);
+    return toDateStr(d);
+  });
+  const [customEnd, setCustomEnd] = useState<string>(today);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const isCustom = mode === "custom";
+
   const fetchData = useCallback(async () => {
+    // 自訂區間不合法時不送請求，沿用現有資料
+    if (isCustom && (!customStart || !customEnd || customStart > customEnd)) {
+      return;
+    }
     setLoading(true);
     setError(null);
 
     try {
       const timestamp = Date.now();
-      let url = `/api/charts/daily-pnl?days=${days}&_t=${timestamp}`;
+      let url = `/api/charts/daily-pnl?_t=${timestamp}`;
+      if (isCustom) {
+        url += `&start=${customStart}&end=${customEnd}`;
+      } else {
+        url += `&days=${days}`;
+      }
       if (portfolioId) {
         url += `&portfolio_id=${portfolioId}`;
       }
@@ -73,7 +96,7 @@ export default function DailyPnLChart({ portfolioId, refreshKey }: Props) {
     } finally {
       setLoading(false);
     }
-  }, [portfolioId, days]);
+  }, [portfolioId, days, isCustom, customStart, customEnd]);
 
   useEffect(() => {
     fetchData();
@@ -123,20 +146,54 @@ export default function DailyPnLChart({ portfolioId, refreshKey }: Props) {
 
   // 天數切換按鈕列（不論載入狀態都顯示，避免版面跳動）
   const daySelector = (
-    <div className="flex items-center gap-1 mb-3">
-      {DAY_OPTIONS.map((d) => (
+    <div className="mb-3">
+      <div className="flex items-center gap-1 flex-wrap">
+        {DAY_OPTIONS.map((d) => (
+          <button
+            key={d}
+            onClick={() => { setMode("preset"); setDays(d); }}
+            className={`px-2.5 py-1 text-xs rounded-full font-medium transition-colors ${
+              !isCustom && days === d
+                ? "bg-primary text-white"
+                : "bg-border/50 text-muted hover:text-foreground hover:bg-border"
+            }`}
+          >
+            {d}日
+          </button>
+        ))}
         <button
-          key={d}
-          onClick={() => setDays(d)}
+          onClick={() => setMode("custom")}
           className={`px-2.5 py-1 text-xs rounded-full font-medium transition-colors ${
-            days === d
+            isCustom
               ? "bg-primary text-white"
               : "bg-border/50 text-muted hover:text-foreground hover:bg-border"
           }`}
         >
-          {d}日
+          自訂
         </button>
-      ))}
+      </div>
+      {isCustom && (
+        <div className="flex items-center gap-2 mt-2 text-xs text-muted">
+          <input
+            type="date"
+            value={customStart}
+            max={customEnd || today}
+            onChange={(e) => setCustomStart(e.target.value)}
+            className="px-2 py-1 text-xs"
+            title="開始日期"
+          />
+          <span>~</span>
+          <input
+            type="date"
+            value={customEnd}
+            min={customStart}
+            max={today}
+            onChange={(e) => setCustomEnd(e.target.value)}
+            className="px-2 py-1 text-xs"
+            title="結束日期"
+          />
+        </div>
+      )}
     </div>
   );
 
@@ -198,7 +255,7 @@ export default function DailyPnLChart({ portfolioId, refreshKey }: Props) {
               stroke="#666"
               fontSize={12}
               tickLine={false}
-              interval={xAxisInterval(days)}
+              interval={xAxisInterval(data.length)}
             />
             <YAxis
               tickFormatter={formatCurrency}

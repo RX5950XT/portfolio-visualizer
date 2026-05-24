@@ -30,6 +30,15 @@ export async function GET(request: Request) {
     const days = parseInt(searchParams.get('days') || '7', 10);
     const portfolioId = searchParams.get('portfolio_id');
 
+    // 自訂區間：start/end 皆為 YYYY-MM-DD，兩者齊備才啟用
+    const startParam = searchParams.get('start');
+    const endParam = searchParams.get('end');
+    const dateRe = /^\d{4}-\d{2}-\d{2}$/;
+    const customMode = Boolean(startParam && endParam);
+    if (customMode && (!dateRe.test(startParam!) || !dateRe.test(endParam!) || startParam! > endParam!)) {
+      return NextResponse.json({ error: '日期區間格式錯誤' }, { status: 400 });
+    }
+
     const visibleIds = await getVisiblePortfolioIdsForRole(role);
     if (visibleIds !== null && portfolioId && !visibleIds.includes(portfolioId)) {
       return NextResponse.json({ error: '無權限檢視此投資組合' }, { status: 403 });
@@ -53,12 +62,22 @@ export async function GET(request: Request) {
     }
     if (!holdings || holdings.length === 0) return NextResponse.json({ data: [] });
 
-    const endDate = new Date();
-    const startDate = new Date();
-    // 多抓 2.5 倍日曆天，確保涵蓋足夠交易日
-    startDate.setDate(startDate.getDate() - Math.ceil(days * 2.5));
-    const startDateStr = startDate.toISOString().split('T')[0];
-    const endDateStr = endDate.toISOString().split('T')[0];
+    let startDateStr: string;
+    let endDateStr: string;
+    if (customMode) {
+      endDateStr = endParam!;
+      // 往前多抓 10 日曆天，確保涵蓋區間首日的「前一個交易日」以計算當日損益
+      const s = new Date(startParam!);
+      s.setDate(s.getDate() - 10);
+      startDateStr = s.toISOString().split('T')[0];
+    } else {
+      const endDate = new Date();
+      const startDate = new Date();
+      // 多抓 2.5 倍日曆天，確保涵蓋足夠交易日
+      startDate.setDate(startDate.getDate() - Math.ceil(days * 2.5));
+      startDateStr = startDate.toISOString().split('T')[0];
+      endDateStr = endDate.toISOString().split('T')[0];
+    }
 
     const holdingIds = holdings.map((h: Holding) => h.id);
 
@@ -134,7 +153,10 @@ export async function GET(request: Request) {
       }
     }
 
-    return NextResponse.json({ data: pnlData.slice(-days) });
+    const result = customMode
+      ? pnlData.filter((p) => p.date >= startParam! && p.date <= endParam!)
+      : pnlData.slice(-days);
+    return NextResponse.json({ data: result });
   } catch (err) {
     console.error('計算每日損益失敗:', err);
     return NextResponse.json({ error: '伺服器錯誤' }, { status: 500 });

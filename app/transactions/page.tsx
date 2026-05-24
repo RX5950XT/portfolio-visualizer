@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { ArrowLeft, RefreshCw, LogOut, TrendingUp, TrendingDown } from 'lucide-react';
 import type { Transaction } from '@/types';
 import TransactionList from '@/components/transactions/TransactionList';
+import EditNotesDialog from '@/components/transactions/EditNotesDialog';
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
 
 function TransactionsContent() {
@@ -19,12 +20,20 @@ function TransactionsContent() {
   const [userRole, setUserRole] = useState<'admin' | 'guest' | null>(null);
   const isAdmin = userRole === 'admin';
 
-  // 刪除確認對話框
+  // 刪除確認對話框（一次賣出可能對應多筆 tx，故存 id 陣列）
   const [deleteConfirm, setDeleteConfirm] = useState<{
     isOpen: boolean;
-    transactionId: string | null;
+    ids: string[];
     symbol: string;
-  }>({ isOpen: false, transactionId: null, symbol: '' });
+  }>({ isOpen: false, ids: [], symbol: '' });
+
+  // 編輯備註對話框（整組 tx 共用同一備註）
+  const [editNotes, setEditNotes] = useState<{
+    isOpen: boolean;
+    ids: string[];
+    symbol: string;
+    notes: string | null;
+  }>({ isOpen: false, ids: [], symbol: '', notes: null });
 
   const loadTransactions = useCallback(async () => {
     try {
@@ -75,34 +84,68 @@ function TransactionsContent() {
     }
   };
 
-  // 刪除交易紀錄
-  const handleDeleteClick = (tx: Transaction) => {
-    setDeleteConfirm({
-      isOpen: true,
-      transactionId: tx.id,
-      symbol: tx.symbol,
-    });
+  // 刪除交易紀錄（整組賣出一起刪）
+  const handleDeleteClick = (ids: string[], symbol: string) => {
+    setDeleteConfirm({ isOpen: true, ids, symbol });
   };
 
   const handleDeleteConfirm = async () => {
-    if (!deleteConfirm.transactionId) return;
+    if (deleteConfirm.ids.length === 0) return;
 
     try {
-      const res = await fetch(`/api/transactions/${deleteConfirm.transactionId}`, {
-        method: 'DELETE',
-      });
-      if (res.ok) {
+      const results = await Promise.all(
+        deleteConfirm.ids.map((id) =>
+          fetch(`/api/transactions/${id}`, { method: 'DELETE' })
+        )
+      );
+      if (results.every((r) => r.ok)) {
+        refreshData();
+      } else {
+        console.error('部分賣出紀錄刪除失敗');
         refreshData();
       }
     } catch (err) {
       console.error('刪除紀錄失敗:', err);
     } finally {
-      setDeleteConfirm({ isOpen: false, transactionId: null, symbol: '' });
+      setDeleteConfirm({ isOpen: false, ids: [], symbol: '' });
     }
   };
 
   const handleDeleteCancel = () => {
-    setDeleteConfirm({ isOpen: false, transactionId: null, symbol: '' });
+    setDeleteConfirm({ isOpen: false, ids: [], symbol: '' });
+  };
+
+  // 編輯備註：整組 tx 一起更新
+  const handleEditNotesClick = (ids: string[], symbol: string, currentNotes: string | null) => {
+    setEditNotes({ isOpen: true, ids, symbol, notes: currentNotes });
+  };
+
+  const handleNotesSave = async (notes: string) => {
+    if (editNotes.ids.length === 0) return;
+
+    try {
+      const results = await Promise.all(
+        editNotes.ids.map((id) =>
+          fetch(`/api/transactions/${id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ notes }),
+          })
+        )
+      );
+      if (!results.every((r) => r.ok)) {
+        console.error('部分備註更新失敗');
+      }
+      refreshData();
+    } catch (err) {
+      console.error('更新備註失敗:', err);
+    } finally {
+      setEditNotes({ isOpen: false, ids: [], symbol: '', notes: null });
+    }
+  };
+
+  const handleNotesCancel = () => {
+    setEditNotes({ isOpen: false, ids: [], symbol: '', notes: null });
   };
 
   const formatCurrency = (value: number) => {
@@ -119,7 +162,10 @@ function TransactionsContent() {
   const totalRealizedPnl = sellTransactions.reduce(
     (sum, t) => sum + (t.realized_pnl_twd || 0), 0
   );
-  const totalSellCount = sellTransactions.length;
+  // 賣出次數以「一次賣出」為單位（同 日期/標的/市場/價/created_at 的多筆 tx 算一次）
+  const totalSellCount = new Set(
+    sellTransactions.map(t => `${t.transaction_date}|${t.symbol}|${t.market}|${t.price}|${t.created_at}`)
+  ).size;
 
   if (loading) {
     return (
@@ -195,6 +241,7 @@ function TransactionsContent() {
         <TransactionList
           transactions={sellTransactions}
           onDelete={isAdmin ? handleDeleteClick : undefined}
+          onEditNotes={isAdmin ? handleEditNotesClick : undefined}
           readOnly={!isAdmin}
         />
       </div>
@@ -210,6 +257,16 @@ function TransactionsContent() {
         onConfirm={handleDeleteConfirm}
         onCancel={handleDeleteCancel}
       />
+
+      {/* 編輯備註對話框（開啟時才掛載，確保初始值正確） */}
+      {editNotes.isOpen && (
+        <EditNotesDialog
+          symbol={editNotes.symbol}
+          initialNotes={editNotes.notes}
+          onSave={handleNotesSave}
+          onCancel={handleNotesCancel}
+        />
+      )}
     </div>
   );
 }

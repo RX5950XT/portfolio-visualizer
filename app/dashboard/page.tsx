@@ -57,7 +57,7 @@ export default function DashboardPage() {
   }>({ isOpen: false, holdingId: null, holdingSymbol: "" });
 
   // 賣出彈窗狀態
-  const [sellTarget, setSellTarget] = useState<HoldingWithQuote | null>(null);
+  const [sellTarget, setSellTarget] = useState<AggregatedHolding | null>(null);
 
   // 現金餘額狀態
   const [cashBalance, setCashBalance] = useState<number>(0);

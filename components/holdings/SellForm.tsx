@@ -2,10 +2,10 @@
 
 import { useState } from 'react';
 import { X } from 'lucide-react';
-import type { HoldingWithQuote } from '@/types';
+import type { AggregatedHolding } from '@/types';
 
 interface Props {
-  holding: HoldingWithQuote;
+  holding: AggregatedHolding;
   portfolioId?: string | null;
   exchangeRate: number;
   onClose: () => void;
@@ -59,7 +59,7 @@ export default function SellForm({ holding, portfolioId, exchangeRate, onClose, 
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          holding_id: holding.id,
+          lot_ids: holding.lots.map((l) => l.id),
           shares: sellSharesNum,
           price: sellPriceNum,
           transaction_date: sellDate,

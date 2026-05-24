@@ -3,6 +3,29 @@ import { createServerClient } from '@/lib/supabase';
 import { getUserRole, getVisiblePortfolioIdsForRole } from '@/lib/auth';
 import { fetchExchangeRate } from '@/lib/stocks';
 
+// 賣出時用 UI 傳來的批次 id 直接定位，避免跨 portfolio/symbol 的查詢歧義
+interface LotRow {
+  id: string;
+  symbol: string;
+  market: 'US' | 'TW';
+  shares: number;
+  cost_price: number;
+  portfolio_id: string | null;
+}
+
+interface SellTxRow {
+  symbol: string;
+  type: 'sell';
+  shares: number;
+  price: number;
+  transaction_date: string;
+  market: 'US' | 'TW';
+  realized_pnl_twd: number;
+  holding_id: string;
+  portfolio_id: string | null;
+  notes: string | null;
+}
+
 // 權限檢查輔助函式
 async function requireAdmin() {
   const role = await getUserRole();
@@ -58,141 +81,159 @@ export async function GET(request: Request) {
   }
 }
 
-// POST: 賣出股票（原子操作：寫紀錄 + 更新持股 + 更新現金）
+// POST: 賣出股票（以標的整體為單位）
+//
+// 賣出視為一體：聚合該標的所有批次 → 用整體加權均價計損益 → 各批次依比例扣減。
+// pro-rata 下「各批次用自身成本算損益再加總」恆等於「整體均價損益」，
+// 且每個被扣批次各寫一筆 sell tx（holding_id 對應 lot），歷史圖表重建邏輯無須改動。
 export async function POST(request: Request) {
   try {
     const forbidden = await requireAdmin();
     if (forbidden) return forbidden;
 
     const body = await request.json();
-    const { holding_id, shares: sellShares, price: sellPrice, transaction_date, portfolio_id, notes } = body;
+    const { lot_ids, shares: sellShares, price: sellPrice, transaction_date, notes } = body;
 
-    if (!holding_id || !sellShares || !sellPrice || !transaction_date) {
+    if (!Array.isArray(lot_ids) || lot_ids.length === 0 || !sellShares || !sellPrice || !transaction_date) {
       return NextResponse.json({ error: '請填寫所有必填欄位' }, { status: 400 });
+    }
+
+    const sellSharesNum = parseFloat(sellShares);
+    const sellPriceNum = parseFloat(sellPrice);
+
+    if (!(sellSharesNum > 0)) {
+      return NextResponse.json({ error: '賣出股數必須大於 0' }, { status: 400 });
+    }
+    if (!(sellPriceNum > 0)) {
+      return NextResponse.json({ error: '成交價必須大於 0' }, { status: 400 });
     }
 
     const supabase = createServerClient();
 
-    // 取得目標持股
-    const { data: holding, error: holdingError } = await supabase
+    const { data: lotsData, error: lotsError } = await supabase
       .from('holdings')
       .select('*')
-      .eq('id', holding_id)
-      .single();
+      .in('id', lot_ids)
+      .gt('shares', 0);
 
-    if (holdingError || !holding) {
+    if (lotsError) {
+      console.error('取得持股失敗:', lotsError);
+      return NextResponse.json({ error: '取得持股失敗' }, { status: 500 });
+    }
+
+    const lots = (lotsData ?? []) as LotRow[];
+    if (lots.length === 0) {
       return NextResponse.json({ error: '找不到該持股' }, { status: 404 });
     }
 
-    const currentShares = Number(holding.shares);
-    const sellSharesNum = parseFloat(sellShares);
-    const sellPriceNum = parseFloat(sellPrice);
-
-    if (sellSharesNum <= 0) {
-      return NextResponse.json({ error: '賣出股數必須大於 0' }, { status: 400 });
+    // 整體賣出前提：所有批次須為同一標的（同 symbol、同 market）
+    const { symbol, market } = lots[0];
+    if (lots.some((l) => l.symbol !== symbol || l.market !== market)) {
+      return NextResponse.json({ error: '批次資料不一致' }, { status: 400 });
     }
 
-    if (sellSharesNum > currentShares) {
+    const totalShares = lots.reduce((sum, l) => sum + Number(l.shares), 0);
+    const totalCost = lots.reduce((sum, l) => sum + Number(l.shares) * Number(l.cost_price), 0);
+    const avgCost = totalCost / totalShares;
+
+    const EPS = 1e-8;
+    if (sellSharesNum > totalShares + EPS) {
       return NextResponse.json(
-        { error: `賣出股數 (${sellSharesNum}) 超過持有量 (${currentShares})` },
+        { error: `賣出股數 (${sellSharesNum}) 超過持有量 (${totalShares})` },
         { status: 400 }
       );
     }
 
-    // 計算已實現損益 (TWD)
-    const costPrice = Number(holding.cost_price);
-    const isUS = holding.market === 'US';
+    const isUS = market === 'US';
     const exchangeRate = isUS ? ((await fetchExchangeRate()) || 32) : 1;
-    const realizedPnl = (sellPriceNum - costPrice) * sellSharesNum * exchangeRate;
+    const portfolioId = body.portfolio_id || lots[0].portfolio_id || null;
+    const ratio = sellSharesNum / totalShares;
 
-    // 賣出金額 (TWD)
-    const sellAmountTWD = sellPriceNum * sellSharesNum * exchangeRate;
+    // pro-rata 累積分配：用「應累積賣出 − 已實際扣減」算每批次扣減量，
+    // 確保各批次扣減總和精確等於賣出股數，不受浮點誤差影響。
+    const txRows: SellTxRow[] = [];
+    const lotUpdates: { id: string; shares: number }[] = [];
 
-    // 寫入交易紀錄
-    const { error: txError } = await supabase
-      .from('transactions')
-      .insert({
-        symbol: holding.symbol,
+    let cumSharesSeen = 0;
+    let cumDeducted = 0;
+    for (let i = 0; i < lots.length; i++) {
+      const lot = lots[i];
+      const lotShares = Number(lot.shares);
+      cumSharesSeen += lotShares;
+
+      const targetCum = i === lots.length - 1 ? sellSharesNum : cumSharesSeen * ratio;
+      let deduct = targetCum - cumDeducted;
+      if (deduct < 0) deduct = 0;
+      if (deduct > lotShares) deduct = lotShares;
+      cumDeducted += deduct;
+
+      if (deduct <= EPS) continue;
+
+      const remaining = lotShares - deduct;
+      const realizedPnl = (sellPriceNum - Number(lot.cost_price)) * deduct * exchangeRate;
+
+      txRows.push({
+        symbol,
         type: 'sell',
-        shares: sellSharesNum,
+        shares: deduct,
         price: sellPriceNum,
         transaction_date,
-        market: holding.market,
+        market,
         realized_pnl_twd: Math.round(realizedPnl * 100) / 100,
-        holding_id,
-        portfolio_id: portfolio_id || holding.portfolio_id || null,
+        holding_id: lot.id,
+        portfolio_id: portfolioId,
         notes: notes || null,
       });
+      lotUpdates.push({ id: lot.id, shares: remaining <= EPS ? 0 : remaining });
+    }
 
+    // 寫入交易紀錄（各被扣批次各一筆，holding_id 對應 lot 供歷史重建）
+    const { error: txError } = await supabase.from('transactions').insert(txRows);
     if (txError) {
       console.error('寫入交易紀錄失敗:', txError);
       return NextResponse.json({ error: '寫入交易紀錄失敗' }, { status: 500 });
     }
 
-    // 更新持股：部分賣出 → 減少股數，全部賣出 → 刪除
-    const remainingShares = currentShares - sellSharesNum;
-
-    if (remainingShares <= 0.00000001) {
-      // 全數賣出：軟刪除（shares=0 保留 row），供歷史圖表重建持股量；儀表板清單以 shares>0 過濾
+    // 更新各批次股數（全扣 → shares=0 軟刪除，保留 row 供歷史圖表重建）
+    const now = new Date().toISOString();
+    for (const u of lotUpdates) {
       const { error: updateError } = await supabase
         .from('holdings')
-        .update({ shares: 0, updated_at: new Date().toISOString() })
-        .eq('id', holding_id);
-
-      if (updateError) {
-        console.error('更新持股失敗:', updateError);
-        return NextResponse.json({ error: '更新持股失敗' }, { status: 500 });
-      }
-    } else {
-      // 部分賣出，更新股數
-      const { error: updateError } = await supabase
-        .from('holdings')
-        .update({
-          shares: remainingShares,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', holding_id);
-
+        .update({ shares: u.shares, updated_at: now })
+        .eq('id', u.id);
       if (updateError) {
         console.error('更新持股失敗:', updateError);
         return NextResponse.json({ error: '更新持股失敗' }, { status: 500 });
       }
     }
 
-    // 更新現金餘額（加回賣出金額）
-    const portfolioFilter = portfolio_id || holding.portfolio_id;
+    // 更新現金餘額（加回整體賣出金額）
+    const sellAmountTWD = sellPriceNum * sellSharesNum * exchangeRate;
     let cashQuery = supabase.from('cash_balance').select('*');
-    if (portfolioFilter) {
-      cashQuery = cashQuery.eq('portfolio_id', portfolioFilter);
+    if (portfolioId) {
+      cashQuery = cashQuery.eq('portfolio_id', portfolioId);
     }
-
     const { data: cashData } = await cashQuery.single();
 
     if (cashData) {
       await supabase
         .from('cash_balance')
-        .update({
-          amount_twd: Number(cashData.amount_twd) + sellAmountTWD,
-          updated_at: new Date().toISOString(),
-        })
+        .update({ amount_twd: Number(cashData.amount_twd) + sellAmountTWD, updated_at: now })
         .eq('id', cashData.id);
     } else {
-      // 沒有現金紀錄就建立一筆
-      const insertData: { amount_twd: number; portfolio_id?: string } = {
-        amount_twd: sellAmountTWD,
-      };
-      if (portfolioFilter) {
-        insertData.portfolio_id = portfolioFilter;
-      }
+      const insertData: { amount_twd: number; portfolio_id?: string } = { amount_twd: sellAmountTWD };
+      if (portfolioId) insertData.portfolio_id = portfolioId;
       await supabase.from('cash_balance').insert(insertData);
     }
 
+    const totalRealizedPnl = txRows.reduce((sum, t) => sum + (t.realized_pnl_twd || 0), 0);
     return NextResponse.json({
       data: {
         success: true,
-        realized_pnl_twd: Math.round(realizedPnl * 100) / 100,
-        remaining_shares: remainingShares > 0.00000001 ? remainingShares : 0,
+        realized_pnl_twd: Math.round(totalRealizedPnl * 100) / 100,
+        remaining_shares: Math.max(0, totalShares - sellSharesNum),
         cash_added_twd: Math.round(sellAmountTWD),
+        avg_cost: avgCost,
       },
     });
   } catch (err) {
