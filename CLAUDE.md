@@ -149,7 +149,9 @@ npx shadcn@latest add button card input label dialog table
 
 ### Phase 2：資料庫設定
 1. 登入 Supabase Dashboard，建立新專案
-2. 執行 `migrations/` 下的 SQL（`create_portfolios.sql` → `create_transactions.sql` → `add_guest_visibility.sql` → `20260513_supabase_data_api_remediation.sql`）
+2. 執行 `migrations/` 下的 SQL（`create_portfolios.sql` → `create_transactions.sql` → `add_guest_visibility.sql` → `20260513_supabase_data_api_remediation.sql` → `20260525_app_settings.sql`）
+
+   > `20260525_app_settings.sql` 為 AI 顧問設定表，**刻意只 GRANT service_role + 啟 RLS**（內含 OpenRouter API Key，不開放 anon）。
 3. 設定環境變數
 
 ### Phase 3：認證機制（已完成，含安全強化）
