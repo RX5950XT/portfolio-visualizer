@@ -2,7 +2,8 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Lock, Eye, EyeOff, TrendingUp } from 'lucide-react';
+import { Eye, EyeOff } from 'lucide-react';
+import Logo from '@/components/Logo';
 
 export default function LoginPage() {
   const [password, setPassword] = useState('');
@@ -43,9 +44,7 @@ export default function LoginPage() {
       <div className="card w-full max-w-md">
         {/* Logo */}
         <div className="flex items-center justify-center gap-3 mb-8">
-          <div className="p-3 rounded-full bg-primary/10">
-            <TrendingUp className="w-8 h-8 text-primary" />
-          </div>
+          <Logo className="w-11 h-11 text-foreground" />
           <h1 className="text-2xl font-bold">Portfolio Visualizer</h1>
         </div>
 
