@@ -22,11 +22,9 @@ CREATE INDEX IF NOT EXISTS idx_transactions_symbol ON transactions(symbol);
 CREATE INDEX IF NOT EXISTS idx_transactions_date ON transactions(transaction_date);
 CREATE INDEX IF NOT EXISTS idx_transactions_portfolio ON transactions(portfolio_id);
 
--- Enable RLS
+-- 啟用 RLS：不建任何 policy（RLS on + 無 policy = 預設拒絕）。
+-- app 一律走 service_role，service_role 不受 RLS 限制，故無需寬鬆 policy。
 ALTER TABLE transactions ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Allow all operations on transactions" ON transactions FOR ALL USING (true);
 
--- Explicit GRANTs for Data API access (Supabase 2026-05-30 起要求)
-GRANT SELECT, INSERT, UPDATE, DELETE ON public.transactions TO anon;
-GRANT SELECT, INSERT, UPDATE, DELETE ON public.transactions TO authenticated;
+-- Data API：僅開放 service_role，刻意不給 anon/authenticated。
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.transactions TO service_role;

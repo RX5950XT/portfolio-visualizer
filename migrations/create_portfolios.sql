@@ -22,34 +22,27 @@ DECLARE
 BEGIN
   -- 檢查是否已有預設組合
   SELECT id INTO default_portfolio_id FROM portfolios WHERE is_default = TRUE LIMIT 1;
-  
+
   -- 如果沒有預設組合，建立一個
   IF default_portfolio_id IS NULL THEN
     INSERT INTO portfolios (name, is_default)
     VALUES ('我的投資組合', TRUE)
     RETURNING id INTO default_portfolio_id;
   END IF;
-  
+
   -- 遷移沒有 portfolio_id 的 holdings
   UPDATE holdings
   SET portfolio_id = default_portfolio_id
   WHERE portfolio_id IS NULL;
-  
+
   -- 遷移沒有 portfolio_id 的 cash_balance
   UPDATE cash_balance
   SET portfolio_id = default_portfolio_id
   WHERE portfolio_id IS NULL;
 END $$;
 
--- Explicit GRANTs for Data API access (Supabase 2026-05-30 起要求)
-GRANT SELECT, INSERT, UPDATE, DELETE ON public.portfolios TO anon;
-GRANT SELECT, INSERT, UPDATE, DELETE ON public.portfolios TO authenticated;
+-- Data API：本 app 一律走伺服器端 service_role，刻意不開放 anon/authenticated，
+-- 避免未登入者用公開 anon key 直接讀寫資料、繞過密碼登入。
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.portfolios TO service_role;
-
-GRANT SELECT, INSERT, UPDATE, DELETE ON public.holdings TO anon;
-GRANT SELECT, INSERT, UPDATE, DELETE ON public.holdings TO authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.holdings TO service_role;
-
-GRANT SELECT, INSERT, UPDATE, DELETE ON public.cash_balance TO anon;
-GRANT SELECT, INSERT, UPDATE, DELETE ON public.cash_balance TO authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.cash_balance TO service_role;

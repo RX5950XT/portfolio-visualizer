@@ -56,7 +56,7 @@ S50 Supabase Data API GRANT remediation for portfolio-app — respond to Supabas
 927 11:37p 🔵 Supabase Pooler Connection URL Found — Direct psql Connection Path Available
 928 11:38p 🔵 --dns-resolver https Flag Unblocks supabase CLI Queries; Circuit Breaker Triggered by Retry Storm
 929 " 🔴 Remediation Migration Successfully Applied to Remote Supabase Database
-930 11:39p 🔵 Data API Verification: All 6 Tables Return HTTP 200 for Both anon and service_role Keys
+930 11:39p 🚨 [已於 2026-05-26 證實為 CRITICAL 漏洞並修補] 當時 6 表 anon key 直接回 HTTP 200 = 未登入可繞過密碼讀寫全部資料；非「驗證通過」。已 REVOKE anon、改為僅 service_role，anon 現回 401（見 migrations/20260525_revoke_anon_data_access.sql）
 931 11:40p 🔵 Database-Level RLS Policy Verification: All 3 Previously Missing Policies Now Confirmed Present
 932 " 🔴 ESLint Errors Fixed: prefer-const in asset-trend Route and Two any-Types in DailyPnLChart
 933 11:41p 🔴 PieChart.tsx: CustomTooltip Moved Outside Render Function — React State Reset Bug Fixed

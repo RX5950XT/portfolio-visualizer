@@ -46,31 +46,16 @@ CREATE INDEX IF NOT EXISTS idx_cash_portfolio ON cash_balance(portfolio_id);
 CREATE INDEX IF NOT EXISTS idx_holdings_symbol ON holdings(symbol);
 CREATE INDEX IF NOT EXISTS idx_snapshots_date ON daily_snapshots(snapshot_date);
 
--- Enable Row Level Security (但允許所有操作，因為是單用戶應用)
+-- 啟用 RLS：不建任何 policy（RLS on + 無 policy = 預設拒絕）。
+-- 本 app 一律走伺服器端 service_role（不受 RLS 限制），故無需寬鬆 policy。
+-- 切勿改成 USING(true) 或 GRANT 給 anon——那會讓未登入者用公開 anon key 直接讀寫資料。
 ALTER TABLE cash_balance ENABLE ROW LEVEL SECURITY;
 ALTER TABLE holdings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE daily_snapshots ENABLE ROW LEVEL SECURITY;
 ALTER TABLE etf_expense_ratios ENABLE ROW LEVEL SECURITY;
 
--- Create policies to allow all operations (單用戶不需複雜權限)
-CREATE POLICY "Allow all operations on cash_balance" ON cash_balance FOR ALL USING (true);
-CREATE POLICY "Allow all operations on holdings" ON holdings FOR ALL USING (true);
-CREATE POLICY "Allow all operations on daily_snapshots" ON daily_snapshots FOR ALL USING (true);
-CREATE POLICY "Allow all operations on etf_expense_ratios" ON etf_expense_ratios FOR ALL USING (true);
-
--- Explicit GRANTs for Data API access (Supabase 2026-05-30 起要求)
-GRANT SELECT, INSERT, UPDATE, DELETE ON public.cash_balance TO anon;
-GRANT SELECT, INSERT, UPDATE, DELETE ON public.cash_balance TO authenticated;
+-- Data API：僅開放 service_role，刻意不給 anon/authenticated。
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.cash_balance TO service_role;
-
-GRANT SELECT, INSERT, UPDATE, DELETE ON public.holdings TO anon;
-GRANT SELECT, INSERT, UPDATE, DELETE ON public.holdings TO authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.holdings TO service_role;
-
-GRANT SELECT, INSERT, UPDATE, DELETE ON public.daily_snapshots TO anon;
-GRANT SELECT, INSERT, UPDATE, DELETE ON public.daily_snapshots TO authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.daily_snapshots TO service_role;
-
-GRANT SELECT, INSERT, UPDATE, DELETE ON public.etf_expense_ratios TO anon;
-GRANT SELECT, INSERT, UPDATE, DELETE ON public.etf_expense_ratios TO authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.etf_expense_ratios TO service_role;

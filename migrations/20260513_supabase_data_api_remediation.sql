@@ -1,6 +1,9 @@
--- Supabase Data API grant policy remediation
--- Why: 2026-05-30 起，public schema 新表若未明確 GRANT，將無法透過 Data API 存取。
--- 此 migration 也補齊 remote 缺漏的基礎表與 RLS/policy，確保既有專案可重複執行。
+-- Supabase Data API 權限設定（修正版）
+-- Why: 補齊 remote 缺漏的基礎表，並把存取權收斂為「僅 service_role」。
+--      本 app 一律透過伺服器端 service_role 存取，刻意不開放 anon/authenticated；
+--      RLS 啟用但不建立寬鬆 policy（on + 無 policy = 預設拒絕），避免未登入繞過密碼直讀資料。
+-- 註：早期版本曾 GRANT 給 anon + 建立 USING(true) policy，已證實為 CRITICAL 外洩開口，
+--     由 20260525_revoke_anon_data_access.sql 撤銷；此檔同步改為正確作法，重跑亦安全。
 
 CREATE TABLE IF NOT EXISTS public.daily_snapshots (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -26,107 +29,10 @@ ALTER TABLE public.transactions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.daily_snapshots ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.etf_expense_ratios ENABLE ROW LEVEL SECURITY;
 
-DO $$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1
-    FROM pg_policies
-    WHERE schemaname = 'public'
-      AND tablename = 'portfolios'
-      AND policyname = 'Allow all operations on portfolios'
-  ) THEN
-    CREATE POLICY "Allow all operations on portfolios"
-      ON public.portfolios
-      FOR ALL
-      USING (true);
-  END IF;
-
-  IF NOT EXISTS (
-    SELECT 1
-    FROM pg_policies
-    WHERE schemaname = 'public'
-      AND tablename = 'cash_balance'
-      AND policyname = 'Allow all operations on cash_balance'
-  ) THEN
-    CREATE POLICY "Allow all operations on cash_balance"
-      ON public.cash_balance
-      FOR ALL
-      USING (true);
-  END IF;
-
-  IF NOT EXISTS (
-    SELECT 1
-    FROM pg_policies
-    WHERE schemaname = 'public'
-      AND tablename = 'holdings'
-      AND policyname = 'Allow all operations on holdings'
-  ) THEN
-    CREATE POLICY "Allow all operations on holdings"
-      ON public.holdings
-      FOR ALL
-      USING (true);
-  END IF;
-
-  IF NOT EXISTS (
-    SELECT 1
-    FROM pg_policies
-    WHERE schemaname = 'public'
-      AND tablename = 'transactions'
-      AND policyname = 'Allow all operations on transactions'
-  ) THEN
-    CREATE POLICY "Allow all operations on transactions"
-      ON public.transactions
-      FOR ALL
-      USING (true);
-  END IF;
-
-  IF NOT EXISTS (
-    SELECT 1
-    FROM pg_policies
-    WHERE schemaname = 'public'
-      AND tablename = 'daily_snapshots'
-      AND policyname = 'Allow all operations on daily_snapshots'
-  ) THEN
-    CREATE POLICY "Allow all operations on daily_snapshots"
-      ON public.daily_snapshots
-      FOR ALL
-      USING (true);
-  END IF;
-
-  IF NOT EXISTS (
-    SELECT 1
-    FROM pg_policies
-    WHERE schemaname = 'public'
-      AND tablename = 'etf_expense_ratios'
-      AND policyname = 'Allow all operations on etf_expense_ratios'
-  ) THEN
-    CREATE POLICY "Allow all operations on etf_expense_ratios"
-      ON public.etf_expense_ratios
-      FOR ALL
-      USING (true);
-  END IF;
-END $$;
-
-GRANT SELECT, INSERT, UPDATE, DELETE ON public.portfolios TO anon;
-GRANT SELECT, INSERT, UPDATE, DELETE ON public.portfolios TO authenticated;
+-- Data API：僅開放 service_role，刻意不給 anon/authenticated。
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.portfolios TO service_role;
-
-GRANT SELECT, INSERT, UPDATE, DELETE ON public.cash_balance TO anon;
-GRANT SELECT, INSERT, UPDATE, DELETE ON public.cash_balance TO authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.cash_balance TO service_role;
-
-GRANT SELECT, INSERT, UPDATE, DELETE ON public.holdings TO anon;
-GRANT SELECT, INSERT, UPDATE, DELETE ON public.holdings TO authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.holdings TO service_role;
-
-GRANT SELECT, INSERT, UPDATE, DELETE ON public.transactions TO anon;
-GRANT SELECT, INSERT, UPDATE, DELETE ON public.transactions TO authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.transactions TO service_role;
-
-GRANT SELECT, INSERT, UPDATE, DELETE ON public.daily_snapshots TO anon;
-GRANT SELECT, INSERT, UPDATE, DELETE ON public.daily_snapshots TO authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.daily_snapshots TO service_role;
-
-GRANT SELECT, INSERT, UPDATE, DELETE ON public.etf_expense_ratios TO anon;
-GRANT SELECT, INSERT, UPDATE, DELETE ON public.etf_expense_ratios TO authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.etf_expense_ratios TO service_role;
