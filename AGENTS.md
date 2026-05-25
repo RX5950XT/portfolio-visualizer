@@ -1,66 +1,38 @@
-<claude-mem-context>
-# Memory Context
+# AGENTS.md — Portfolio Visualizer 協作規範
 
-# [portfolio-app] recent context, 2026-05-14 12:56am GMT+8
+> 本檔為各 AI agent 的專案通用規範，與 `CLAUDE.md` 對齊。
+> `CLAUDE.md` 為完整開發指南；兩者衝突時以 `CLAUDE.md` 為準。
 
-Legend: 🎯session 🔴bugfix 🟣feature 🔄refactor ✅change 🔵discovery ⚖️decision 🚨security_alert 🔐security_note
-Format: ID TIME TYPE TITLE
-Fetch details: get_observations([IDs]) | Search: mem-search skill
+## 語言
+- 一律繁體中文（臺灣用語）回答，技術術語可保留英文；回覆精簡、只講結果。
 
-Stats: 50 obs (16,523t read) | 142,671t work | 88% savings
+## 專案
+- Portfolio Visualizer：單人使用的台美股投資組合視覺化工具。
+- 技術：Next.js 16（App Router）+ TypeScript + Tailwind CSS v4 + Supabase + Recharts + Vercel；AI 健診走 OpenRouter。
+- 已完成進階功能：S&P 500 對照、進階績效指標（XIRR/回撤/波動率/Sharpe/勝率）、配息追蹤（`/dividends`）、配置透視/ETF 穿透（`/insights`）、AI 健診（`/insights` + `/settings`）。
 
-### May 13, 2026
-849 11:02p ✅ supabase/schema.sql Updated with Explicit GRANTs for holdings, daily_snapshots, etf_expense_ratios
-850 " ✅ migrations/create_transactions.sql Updated with Explicit GRANTs for transactions Table
-852 " ✅ migrations/create_portfolios.sql Updated with GRANTs for portfolios, holdings, and cash_balance
-853 11:03p 🔵 cash_balance CREATE TABLE Definitively Absent from All Repository SQL Files
-855 " 🔵 cash_balance Table Schema Inferred from API Route Code
-857 " ✅ cash_balance CREATE TABLE Added to supabase/schema.sql — Previously Untracked Table Now in Source Control
-858 11:04p ✅ Index idx_cash_portfolio Added to cash_balance(portfolio_id) in schema.sql
-860 " ✅ cash_balance Gets Full RLS + Policy + GRANTs in supabase/schema.sql — Remediation Complete for Base Schema Tables
-S50 Supabase Data API GRANT remediation for portfolio-app — respond to Supabase's May 30 2026 policy change requiring explicit GRANTs on public schema tables (May 13, 11:05 PM)
-869 11:11p 🔵 User Queried Whether to Document Browser-Resolved Issue in Global Agent Config Files
-870 11:12p 🔵 portfolio-app Uses Hosted Supabase Only — No Local supabase/config.toml
-871 " 🔵 portfolio-app .env.local Contains Full Supabase Credentials and Auth Config
-872 " 🔵 Global CLAUDE.md Defines Comprehensive Agent Decision Tree for All Projects
-873 " 🔵 Supabase CLI v2.90.0 Installed at C:\Users\rx595\.local\bin
-874 " 🔵 Supabase Account Has Two Projects; portfolio-app Not Linked to Local Directory
-875 " 🔵 supabase link Failed Due to Semicolon in DB Password Causing Shell Parsing Error
-876 " 🔵 portfolio-app Has No supabase/ or migrations/ Directory — Schema Not Version-Controlled Locally
-880 11:17p ⚖️ User Questioned Global Config Documentation Strategy
-881 " 🔵 Portfolio Visualizer Project CLAUDE.md Structure Discovered
-882 11:18p 🔵 Supabase Local Dev Configuration for Portfolio App
-887 " 🔵 Supabase CLI Version Outdated
-893 11:20p 🔵 Supabase Project Is Linked to Remote
-895 11:21p 🔵 Supabase Remote Project Reference Identified
-896 " 🔵 supabase db query Supports --linked Flag for Remote DB Queries
-897 11:22p ✅ Created grant_fix.sql to Patch Missing Supabase Data API Permissions
-898 " 🔵 Remote Database Missing daily_snapshots and etf_expense_ratios Tables
-910 11:31p 🚨 Supabase Data API Default Grant Policy Change — Action Required Before May 30, 2026
-911 " 🔵 portfolio-app SQL Audit: All 5 Tables Lacked Explicit GRANTs; cash_balance Completely Untracked in Source Control
-912 " 🔴 Explicit GRANTs Added to All portfolio-app SQL Migration Files and Schema
-913 " 🟣 cash_balance Table Added to Source Control with Full Schema, RLS, Policies, and GRANTs
-914 " 🔵 portfolio-app Infrastructure: Hosted Supabase Only, CLI Linked but Remote DB Missing Two Tables
-915 " 🟣 grant_fix.sql Created to Patch Missing Supabase Data API Permissions on Live Remote Database
-916 11:34p 🚨 Supabase Data API Default Grant Policy Change — Action Required
-917 " 🔵 Full SQL Audit: All 5 Tables Lack Explicit GRANTs; portfolios Table Also Missing RLS
-918 " 🔴 Explicit GRANTs Added to All Migration Files and schema.sql
-919 " 🔵 Remote Database Missing daily_snapshots and etf_expense_ratios Tables
-920 " 🔵 Remote DB RLS Audit: Only 3 of 6 Tables Have Policies; portfolios Has None
-921 " 🟣 Idempotent Remediation Migration Created: 20260513_supabase_data_api_remediation.sql
-922 " ✅ README.md and CLAUDE.md Updated to Include Remediation Migration in Setup Instructions
-923 11:35p 🔵 supabase db query --linked --file Consistently Times Out at 64 Seconds
-924 " 🔵 ESLint Reveals 4 Errors and 8 Warnings in portfolio-app Codebase
-925 11:36p 🔵 supabase db query --linked Unreliable: pg_tables System Catalog Also Times Out
-926 " 🔵 Remote DB State Unchanged: Migration Not Yet Applied After CLI Timeout Failures
-927 11:37p 🔵 Supabase Pooler Connection URL Found — Direct psql Connection Path Available
-928 11:38p 🔵 --dns-resolver https Flag Unblocks supabase CLI Queries; Circuit Breaker Triggered by Retry Storm
-929 " 🔴 Remediation Migration Successfully Applied to Remote Supabase Database
-930 11:39p 🚨 [已於 2026-05-26 證實為 CRITICAL 漏洞並修補] 當時 6 表 anon key 直接回 HTTP 200 = 未登入可繞過密碼讀寫全部資料；非「驗證通過」。已 REVOKE anon、改為僅 service_role，anon 現回 401（見 migrations/20260525_revoke_anon_data_access.sql）
-931 11:40p 🔵 Database-Level RLS Policy Verification: All 3 Previously Missing Policies Now Confirmed Present
-932 " 🔴 ESLint Errors Fixed: prefer-const in asset-trend Route and Two any-Types in DailyPnLChart
-933 11:41p 🔴 PieChart.tsx: CustomTooltip Moved Outside Render Function — React State Reset Bug Fixed
-934 " 🔴 ESLint Now Passes With Zero Errors — All 4 Blocking Errors Resolved
+## 核心原則
+- 好品味、不破壞用戶行為、實用主義、簡潔執念（詳見 CLAUDE.md「AI 協作哲學」）。
+- 改動最小化、找根因不打補丁；每次修改後自行驗證到通過再回報。
 
-Access 143k tokens of past work via get_observations([IDs]) or mem-search skill.
-</claude-mem-context>
+## 程式碼規範
+- TypeScript strict、明確回傳型別、避免 `any`。
+- App Router、優先 Server Components、Client 元件以 `'use client'` 開頭、元件檔名 PascalCase。
+- 純深色主題；漲 `#22c55e`、跌 `#ef4444`。
+- API 回傳格式 `{ data } | { error }`；路徑 `/api/[resource]/route.ts`。
+- 函式 < 50 行、檔案 < 800 行、巢狀 ≤ 4；只寫解釋「為什麼」的繁中註釋。
+- 股票代號：美股大寫（`AAPL`/`VOO`）、台股上市（`2330.TW`）、上櫃（`6547.TWO`）；美股以 USD 存、顯示轉 TWD。
+
+## 資料庫與安全（鐵則）
+- 資料表**只 GRANT `service_role`**，不給 `anon`/`authenticated`；前端不直連 Supabase，一律經 `createServerClient`。
+- RLS 啟用但**禁用 `USING(true)`**；不開放就不建 policy（on + 無 policy = 預設拒絕）。
+- 新表上線：用 anon key 打 `GET /rest/v1/<table>` **必須回 401** 才算安全。
+- OpenRouter Key 存 `app_settings`（僅 service_role）、遮罩、永不回前端；secrets 一律環境變數或 DB，不硬編碼，`.env*` 不進 git。
+- 認證走 HMAC 簽章 cookie；寫入端點 `requireAdmin()`，讀取端點套訪客可見性過濾。
+
+## Git
+- Commit 格式 `<type>: <description>`（type：feat/fix/refactor/docs/test/chore/perf/ci）。
+- Commit / push 僅在使用者要求時執行。
+
+## 完成前驗證
+- `npm run build`（零 TS 錯誤）、`npm run lint`、375px 響應式正常、深色主題一致、API 格式正確。

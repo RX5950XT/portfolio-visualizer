@@ -10,7 +10,7 @@
 |------|------|
 | **名稱** | Portfolio Visualizer（投資組合視覺化管理器） |
 | **目標** | 追蹤台美股投資組合，視覺化資產配置與報酬率 |
-| **技術** | Next.js 14 + TypeScript + Tailwind CSS + Supabase + Vercel |
+| **技術** | Next.js 16（App Router）+ TypeScript + Tailwind CSS v4 + Supabase + Recharts + Vercel；AI 健診走 OpenRouter |
 | **用戶** | 單人使用（專案擁有者） |
 
 ### 專案文件（docs/ 僅本機，不進 git）
@@ -137,6 +137,18 @@
 
 ---
 
+## 資料庫與安全底線（鐵則）
+
+- **資料表只 GRANT `service_role`**，**不給** `anon`/`authenticated`。app 一律經伺服器端 service_role 存取（`lib/supabase.createServerClient`），前端從不直連 Supabase。
+- **RLS 啟用但禁用 `USING(true)`**：不開放就不要建 policy（RLS on + 無 policy = 預設拒絕）。service_role 不受 RLS 限制，app 照常運作。
+- **新表上線驗證**：用 anon key 實打 `GET /rest/v1/<table>`，**必須回 401** 才算安全。
+  > 曾因 GRANT anon + `USING(true)` 導致未登入者可繞過密碼讀寫全部財務資料（CRITICAL，2026-05-26 修補）。
+- **OpenRouter API Key**：存於 `app_settings`（僅 service_role），僅伺服器端使用；回前端一律遮罩（`sk-or-…abcd`），永不傳明文。
+- 認證走 HMAC 簽章 cookie；寫入端點 `requireAdmin()`，讀取端點套訪客可見性過濾（`getVisiblePortfolioIdsForRole`）。
+- secrets 一律環境變數或 DB（僅 service_role），不硬編碼；`.env*` 不進 git。
+
+---
+
 ## 實作階段
 
 ### Phase 1：基礎建設
@@ -149,10 +161,15 @@ npx shadcn@latest add button card input label dialog table
 
 ### Phase 2：資料庫設定
 1. 登入 Supabase Dashboard，建立新專案
-2. 執行 `migrations/` 下的 SQL（`create_portfolios.sql` → `create_transactions.sql` → `add_guest_visibility.sql` → `20260513_supabase_data_api_remediation.sql` → `20260525_app_settings.sql`）
+2. 依相依順序執行 SQL：
+   `supabase/schema.sql`（基礎表 cash_balance/holdings/daily_snapshots/etf_expense_ratios）
+   → `migrations/create_portfolios.sql` → `create_transactions.sql` → `add_guest_visibility.sql`
+   → `20260513_supabase_data_api_remediation.sql` → `20260525_app_settings.sql`
+   → `20260525_revoke_anon_data_access.sql`
 
    > `20260525_app_settings.sql` 為 AI 顧問設定表，**刻意只 GRANT service_role + 啟 RLS**（內含 OpenRouter API Key，不開放 anon）。
-3. 設定環境變數
+   > `20260525_revoke_anon_data_access.sql` 為安全修補：撤銷 anon/authenticated 對所有資料表的 Data API 權限（詳見「資料庫與安全底線」）。
+3. 設定環境變數（OpenRouter Key 不入環境變數，登入後於 `/settings` 填入）
 
 ### Phase 3：認證機制（已完成，含安全強化）
 - `/app/page.tsx`（登入頁）
@@ -175,10 +192,13 @@ npx shadcn@latest add button card input label dialog table
 - 損益折線圖
 - 個股走勢圖
 
-### Phase 7：進階功能
-- ETF 費用率抓取
-- 回測功能
-- 與 S&P 500 比較
+### Phase 7：進階功能（已完成）
+- ETF 費用率抓取與加權平均
+- 與 S&P 500（^GSPC）對照
+- 進階績效指標：XIRR / 最大回撤 / 波動率 / Sharpe / 勝率（dashboard 摺疊區）
+- 配息追蹤（`/dividends`）：近 12 月配息、殖利率、即將除息
+- 配置透視（`/insights`）：ETF 穿透真實重倉、產業 / 地區分佈
+- AI 投資組合健診（`/insights` + `/settings`）：OpenRouter 串流、Markdown 渲染
 
 ### Phase 8：部署
 - 設定 Vercel 專案與環境變數
