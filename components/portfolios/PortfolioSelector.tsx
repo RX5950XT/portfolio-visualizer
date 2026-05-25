@@ -54,9 +54,10 @@ export default function PortfolioSelector({
       const { data } = await res.json();
       setPortfolios(data || []);
 
-      // 如果沒有選中的組合，選第一個
+      // 如果沒有選中的組合，優先選預設組合，否則第一個
       if (!currentPortfolioId && data && data.length > 0) {
-        onSelectPortfolio(data[0]);
+        const def = data.find((p: Portfolio) => p.is_default) ?? data[0];
+        onSelectPortfolio(def);
       }
     } catch (err) {
       console.error('載入投資組合失敗:', err);

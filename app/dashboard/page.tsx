@@ -14,6 +14,9 @@ import {
   Check,
   X,
   History,
+  Coins,
+  Sparkles,
+  Settings,
 } from "lucide-react";
 import type { Holding, HoldingWithQuote, AggregatedHolding } from "@/types";
 import HoldingForm from "@/components/holdings/HoldingForm";
@@ -22,8 +25,10 @@ import HoldingList from "@/components/holdings/HoldingList";
 import PortfolioPieChart from "@/components/charts/PieChart";
 import AssetTrendChart from "@/components/charts/AssetTrendChart";
 import DailyPnLChart from "@/components/charts/DailyPnLChart";
+import MetricsPanel from "@/components/charts/MetricsPanel";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import PortfolioSelector from "@/components/portfolios/PortfolioSelector";
+import Logo from "@/components/Logo";
 
 // 股價快取（避免重複請求）
 const quoteCache = new Map<
@@ -78,6 +83,15 @@ export default function DashboardPage() {
       }
       return '新的投資組合';
     });
+
+  // 預設組合是否已解析：URL 已帶 portfolio_id 視為已解析；否則先載入 is_default 組合，
+  // 避免在選定組合前就用 null 抓到「所有組合合併」的資料而閃動
+  const [portfolioReady, setPortfolioReady] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      return new URLSearchParams(window.location.search).get('portfolio_id') !== null;
+    }
+    return false;
+  });
 
   // 圖表刷新 key（變化時觸發圖表重新載入）
   const [chartRefreshKey, setChartRefreshKey] = useState<number>(0);
@@ -326,9 +340,36 @@ export default function DashboardPage() {
     loadCashBalance,
   ]);
 
+  // 無 URL portfolio_id 時，先解析預設組合（is_default，否則第一個）再載入
   useEffect(() => {
+    if (portfolioReady) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch('/api/portfolios');
+        const { data } = await res.json();
+        if (!cancelled && Array.isArray(data) && data.length > 0) {
+          const def =
+            data.find((p: { is_default?: boolean }) => p.is_default) ?? data[0];
+          setCurrentPortfolioId(def.id);
+          setCurrentPortfolioName(def.name);
+        }
+      } catch (err) {
+        console.error('解析預設組合失敗:', err);
+      } finally {
+        if (!cancelled) setPortfolioReady(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [portfolioReady]);
+
+  // 預設組合解析完成後才載入資料，避免載入全部合併資料的閃動
+  useEffect(() => {
+    if (!portfolioReady) return;
     refreshData();
-  }, [refreshData]);
+  }, [refreshData, portfolioReady]);
 
   // 載入用戶角色
   useEffect(() => {
@@ -444,7 +485,7 @@ export default function DashboardPage() {
       <header className="flex flex-wrap items-center justify-between gap-4 mb-6">
         <div className="flex flex-wrap items-center gap-2">
           <div className="flex items-center gap-2">
-            <TrendingUp className="w-7 h-7 sm:w-8 sm:h-8 text-primary" />
+            <Logo className="w-7 h-7 sm:w-8 sm:h-8 text-foreground" />
             <h1 className="text-lg sm:text-xl md:text-2xl font-bold">
               Portfolio Visualizer
             </h1>
@@ -472,6 +513,41 @@ export default function DashboardPage() {
           >
             <History className="w-5 h-5" />
           </button>
+          <button
+            onClick={() => {
+              const params = new URLSearchParams();
+              if (currentPortfolioId) params.set('portfolio_id', currentPortfolioId);
+              if (currentPortfolioName) params.set('name', currentPortfolioName);
+              const qs = params.toString();
+              router.push(`/dividends${qs ? `?${qs}` : ''}`);
+            }}
+            className="p-2 rounded-lg hover:bg-card transition-colors"
+            title="配息追蹤"
+          >
+            <Coins className="w-5 h-5" />
+          </button>
+          <button
+            onClick={() => {
+              const params = new URLSearchParams();
+              if (currentPortfolioId) params.set('portfolio_id', currentPortfolioId);
+              if (currentPortfolioName) params.set('name', currentPortfolioName);
+              const qs = params.toString();
+              router.push(`/insights${qs ? `?${qs}` : ''}`);
+            }}
+            className="p-2 rounded-lg hover:bg-card transition-colors"
+            title="配置透視與 AI 健診"
+          >
+            <Sparkles className="w-5 h-5" />
+          </button>
+          {isAdmin && (
+            <button
+              onClick={() => router.push('/settings')}
+              className="p-2 rounded-lg hover:bg-card transition-colors"
+              title="設定"
+            >
+              <Settings className="w-5 h-5" />
+            </button>
+          )}
           <button
             onClick={() => {
               quoteCache.clear();
@@ -685,6 +761,9 @@ export default function DashboardPage() {
           </div>
         </div>
       </div>
+
+      {/* 進階績效指標（可摺疊，展開後才載入） */}
+      <MetricsPanel portfolioId={currentPortfolioId} refreshKey={chartRefreshKey} />
 
       {/* 持股清單 */}
       <div className="card">
