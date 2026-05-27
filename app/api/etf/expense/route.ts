@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { fetchQuote } from '@/lib/stocks';
+import { fetchQuoteSummary } from '@/lib/yahoo-crumb';
 
 // 從 Yahoo Finance 取得 quoteType 判斷是否為 ETF
 async function fetchQuoteType(symbol: string): Promise<string | null> {
@@ -23,32 +24,24 @@ async function fetchQuoteType(symbol: string): Promise<string | null> {
 }
 
 // 從 Yahoo Finance 取得 ETF 費用率
+// quoteSummary v10 自 2024 起需 crumb，必須走 lib/yahoo-crumb 才不會 401
 async function fetchETFExpenseRatio(symbol: string): Promise<number | null> {
   try {
-    // Yahoo Finance V10 API 提供基金資訊
-    const url = `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(symbol)}?modules=fundProfile`;
-    
-    const res = await fetch(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-      },
-      next: { revalidate: 86400 }, // 24 小時快取
-    });
+    const result = await fetchQuoteSummary(symbol, 'fundProfile');
+    const fundProfile = result?.fundProfile as
+      | {
+          feesExpensesInvestment?: {
+            annualReportExpenseRatio?: { raw?: number };
+            netExpenseRatio?: { raw?: number };
+          };
+        }
+      | undefined;
 
-    if (!res.ok) {
-      return null;
-    }
-
-    const data = await res.json();
-    const fundProfile = data.quoteSummary?.result?.[0]?.fundProfile;
-    
-    // 費用率可能在不同欄位
-    const expenseRatio = 
-      fundProfile?.feesExpensesInvestment?.annualReportExpenseRatio?.raw ||
-      fundProfile?.feesExpensesInvestment?.netExpenseRatio?.raw ||
-      null;
-    
-    return expenseRatio;
+    const fees = fundProfile?.feesExpensesInvestment;
+    const ratio =
+      fees?.annualReportExpenseRatio?.raw ?? fees?.netExpenseRatio?.raw ?? null;
+    // Yahoo 偶爾回 0 代表「無資料」而非真的零費用，視為缺值
+    return typeof ratio === 'number' && ratio > 0 ? ratio : null;
   } catch (error) {
     console.error(`取得 ${symbol} 費用率失敗:`, error);
     return null;
