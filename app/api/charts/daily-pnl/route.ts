@@ -131,7 +131,9 @@ export async function GET(request: Request) {
       let dailyPnL = 0;
 
       for (const holding of holdings as Holding[]) {
-        const shares = getSharesAtDate(holding, today);
+        // 用「昨日」持股量乘以價差：避免今天才買的股數套用昨日→今日價差（虛報），
+        // 也避免今天賣出的股數被排除（少報賣前漲跌）。
+        const shares = getSharesAtDate(holding, yesterday);
         if (shares <= 0) continue;
 
         const pm = symbolPriceMap.get(holding.symbol);
