@@ -202,6 +202,13 @@ export async function GET(request: Request) {
 
     upcoming.sort((a, b) => a.exDate.localeCompare(b.exDate));
 
+    // 當月配息 = 本月已實際入帳（來自 months 累計）+ 本月剩餘預估（來自 upcoming）。
+    // 原本只看 upcoming，會漏掉月初已配發的部分，與月度長條圖不一致。
+    const currentMonthIdx = monthIndex.get(currentMonth);
+    if (currentMonthIdx !== undefined) {
+      thisMonthIncome += months[currentMonthIdx].amount;
+    }
+
     return NextResponse.json({
       data: {
         annualEstimate: Math.round(annualEstimate),
