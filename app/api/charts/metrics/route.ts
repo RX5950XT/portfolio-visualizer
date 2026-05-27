@@ -109,7 +109,12 @@ export async function GET(request: Request) {
     if (curve.values.length < 2) return NextResponse.json({ data: null });
 
     // 現金流：買入為流出、賣出為流入、期末市值為流入
+    // 同時建立每日「淨注入」TWD 映射（+ 為投入、- 為提領），供 TWR 指數剝離買賣干擾
     const flows: CashFlow[] = [];
+    const netInflowByDate = new Map<string, number>();
+    const addInflow = (date: string, amount: number) =>
+      netInflowByDate.set(date, (netInflowByDate.get(date) ?? 0) + amount);
+
     for (const lot of holdings as EquityLot[]) {
       const originalShares = curve.getSharesAtDate(lot, lot.purchase_date);
       if (originalShares <= 0) continue;
@@ -117,15 +122,33 @@ export async function GET(request: Request) {
       const fx = isUS ? curve.denseRateMap.get(lot.purchase_date) ?? 32 : 1;
       const cost = originalShares * Number(lot.cost_price) * fx;
       flows.push({ date: lot.purchase_date, amount: -cost });
+      addInflow(lot.purchase_date, cost);
     }
     for (const s of sellRows) {
       const isUS = s.market === 'US';
       const fx = isUS ? curve.denseRateMap.get(s.transaction_date) ?? 32 : 1;
       const proceeds = Number(s.shares) * Number(s.price) * fx;
       flows.push({ date: s.transaction_date, amount: proceeds });
+      addInflow(s.transaction_date, -proceeds);
     }
     const currentValue = curve.values[curve.values.length - 1];
     flows.push({ date: new Date().toISOString().split('T')[0], amount: currentValue });
+
+    // TWR 指數：r[i] = (V[i] - flow[i]) / V[i-1] - 1；以此為基準算回撤/波動率，
+    // 避免賣出造成的市值掉落被誤判為「跌幅」、買入抬高峰值。
+    // 第 0 日視為起始資本（index = 1），不貢獻報酬。
+    const twrIndex: number[] = new Array(curve.values.length);
+    twrIndex[0] = 1;
+    for (let i = 1; i < curve.values.length; i++) {
+      const prev = curve.values[i - 1];
+      const flow = netInflowByDate.get(curve.dates[i]) ?? 0;
+      if (prev > 0) {
+        const r = (curve.values[i] - flow) / prev - 1;
+        twrIndex[i] = twrIndex[i - 1] * (1 + r);
+      } else {
+        twrIndex[i] = twrIndex[i - 1];
+      }
+    }
 
     // 勝率：一次賣出動作為一筆決策。鍵與交易頁 groupSales 一致
     // （pro-rata 多 lot 同一 batch insert → created_at 相同 → 併為一筆；不同次賣出 created_at 不同 → 分開）
@@ -135,13 +158,13 @@ export async function GET(request: Request) {
       pnlByDecision.set(key, (pnlByDecision.get(key) ?? 0) + Number(s.realized_pnl_twd ?? 0));
     }
 
-    const vol = annualizedVolatility(curve.values);
+    const vol = annualizedVolatility(twrIndex);
     const annualReturn = xirr(flows);
-    const ddSeries = drawdownSeries(curve.values);
+    const ddSeries = drawdownSeries(twrIndex);
 
     const data = {
       xirr: annualReturn,
-      maxDrawdown: maxDrawdown(curve.values),
+      maxDrawdown: maxDrawdown(twrIndex),
       volatility: vol,
       sharpe: annualReturn !== null && vol > 0 ? (annualReturn - RISK_FREE) / vol : null,
       winRate: winRate([...pnlByDecision.values()]),
