@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase';
 import { getUserRole, getVisiblePortfolioIdsForRole } from '@/lib/auth';
 import { fetchExchangeRate } from '@/lib/stocks';
+import { fetchFxHistory, buildDenseRateMap } from '@/lib/portfolio-history';
 
 // 賣出時用 UI 傳來的批次 id 直接定位，避免跨 portfolio/symbol 的查詢歧義
 interface LotRow {
@@ -10,6 +11,7 @@ interface LotRow {
   market: 'US' | 'TW';
   shares: number;
   cost_price: number;
+  purchase_date: string;
   portfolio_id: string | null;
 }
 
@@ -145,7 +147,31 @@ export async function POST(request: Request) {
     }
 
     const isUS = market === 'US';
-    const exchangeRate = isUS ? ((await fetchExchangeRate()) || 32) : 1;
+
+    // 美股已實現損益需要分開換算：成本套買入當日 FX、賣價套賣出當日 FX，
+    // 否則用同一個匯率會把整段持有期間的匯率變動吃掉，少算 FX 損益。
+    let sellDayFx = 1;
+    let getFxAtPurchase: (date: string) => number = () => 1;
+    if (isUS) {
+      const earliestPurchase = lots.reduce(
+        (min, l) => (l.purchase_date < min ? l.purchase_date : min),
+        lots[0].purchase_date
+      );
+      const fxStart =
+        earliestPurchase < transaction_date ? earliestPurchase : transaction_date;
+      const fxSparse = await fetchFxHistory(fxStart);
+
+      const dateList: string[] = [];
+      const endDateObj = new Date(transaction_date);
+      for (let d = new Date(fxStart); d <= endDateObj; d.setDate(d.getDate() + 1)) {
+        dateList.push(d.toISOString().split('T')[0]);
+      }
+      const dense = buildDenseRateMap(fxSparse, dateList);
+
+      // 賣出當日 FX：若 Yahoo 尚未更新當日匯率，dense 會 forward-fill；再 fallback 即時匯率
+      sellDayFx = dense.get(transaction_date) ?? (await fetchExchangeRate()) ?? 32;
+      getFxAtPurchase = (date: string) => dense.get(date) ?? sellDayFx;
+    }
     const portfolioId = body.portfolio_id || lots[0].portfolio_id || null;
     const ratio = sellSharesNum / totalShares;
 
@@ -170,7 +196,10 @@ export async function POST(request: Request) {
       if (deduct <= EPS) continue;
 
       const remaining = lotShares - deduct;
-      const realizedPnl = (sellPriceNum - Number(lot.cost_price)) * deduct * exchangeRate;
+      const purchaseFx = getFxAtPurchase(lot.purchase_date);
+      const proceedsTwd = sellPriceNum * deduct * sellDayFx;
+      const costTwd = Number(lot.cost_price) * deduct * purchaseFx;
+      const realizedPnl = proceedsTwd - costTwd;
 
       txRows.push({
         symbol,
@@ -207,8 +236,8 @@ export async function POST(request: Request) {
       }
     }
 
-    // 更新現金餘額（加回整體賣出金額）
-    const sellAmountTWD = sellPriceNum * sellSharesNum * exchangeRate;
+    // 更新現金餘額（加回整體賣出金額）：用賣出當日 FX，與 realizedPnl 換算口徑一致
+    const sellAmountTWD = sellPriceNum * sellSharesNum * sellDayFx;
     let cashQuery = supabase.from('cash_balance').select('*');
     if (portfolioId) {
       cashQuery = cashQuery.eq('portfolio_id', portfolioId);
