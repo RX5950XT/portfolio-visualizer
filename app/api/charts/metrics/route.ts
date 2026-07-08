@@ -8,6 +8,7 @@ import {
   annualizedVolatility,
   xirr,
   winRate,
+  periodReturns,
   type CashFlow,
 } from '@/lib/metrics';
 
@@ -168,6 +169,8 @@ export async function GET(request: Request) {
       volatility: vol,
       sharpe: annualReturn !== null && vol > 0 ? (annualReturn - RISK_FREE) / vol : null,
       winRate: winRate([...pnlByDecision.values()]),
+      // 期間報酬率（TWR 累積）：Total / YTD / 各曆年，複用同一條 twrIndex
+      returns: periodReturns(curve.dates, twrIndex),
       underwater: curve.dates.map((date, i) => ({ date, drawdown: ddSeries[i] })),
     };
 

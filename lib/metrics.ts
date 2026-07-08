@@ -108,3 +108,60 @@ export function winRate(realizedPnls: number[]): { wins: number; total: number; 
   const wins = realizedPnls.filter((p) => p > 0).length;
   return { wins, total, rate: total > 0 ? wins / total : 0 };
 }
+
+// 單一曆年的 TWR 累積報酬
+export interface YearReturn {
+  year: number;
+  return: number;
+  startDate: string; // 該年在序列中的第一日
+  endDate: string; // 該年在序列中的最後一日
+}
+
+// 期間報酬率總覽（皆為 TWR 累積，非年化）
+export interface PeriodReturnSummary {
+  total: number | null; // 自成立以來累積
+  ytd: number | null; // 今年至今累積（等於最後一個曆年的累積）
+  years: YearReturn[]; // 各曆年累積，年份遞增
+}
+
+const EMPTY_RETURNS: PeriodReturnSummary = { total: null, ytd: null, years: [] };
+
+// 期間報酬率：吃 route 已算好的 TWR 指數（index[0]=1、剝離買賣現金流），只做期間切分。
+// 各年報酬 = 該年最後一日 index ÷「前一日 index」− 1；首年基準為 index[0]（起始資本）。
+// 因每年基準取緊鄰前一日，各年 (1+r) 連乘會 telescoping 為 (1 + total)，數字自洽。
+export function periodReturns(dates: string[], index: number[]): PeriodReturnSummary {
+  if (dates.length < 2 || dates.length !== index.length) return EMPTY_RETURNS;
+
+  const startIndex = index[0];
+  const lastIndex = index[index.length - 1];
+  if (!(startIndex > 0) || !Number.isFinite(lastIndex)) return EMPTY_RETURNS;
+
+  // 每個曆年在序列中的首、末索引（dates 遞增，掃描一次即可）
+  const bounds = new Map<number, { first: number; last: number }>();
+  for (let i = 0; i < dates.length; i++) {
+    const year = Number(dates[i].slice(0, 4));
+    const b = bounds.get(year);
+    if (b) b.last = i;
+    else bounds.set(year, { first: i, last: i });
+  }
+
+  const years: YearReturn[] = [];
+  for (const year of [...bounds.keys()].sort((a, b) => a - b)) {
+    const { first, last } = bounds.get(year)!;
+    const base = first === 0 ? startIndex : index[first - 1];
+    if (!(base > 0) || !Number.isFinite(index[last])) continue;
+    years.push({
+      year,
+      return: index[last] / base - 1,
+      startDate: dates[first],
+      endDate: dates[last],
+    });
+  }
+
+  // ytd 取最後一個曆年的累積：序列末日即「今天」，故末年 = 今年至今
+  return {
+    total: lastIndex / startIndex - 1,
+    ytd: years.length ? years[years.length - 1].return : lastIndex / startIndex - 1,
+    years,
+  };
+}
