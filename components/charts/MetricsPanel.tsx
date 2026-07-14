@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import type { ReactElement } from 'react';
 import {
   AreaChart,
   Area,
@@ -27,16 +28,35 @@ interface YearReturn {
 interface PeriodReturns {
   total: number | null;
   ytd: number | null;
+  annualized: number | null;
   years: YearReturn[];
+}
+
+interface BenchmarkSummary {
+  name: string;
+  total: number | null;
+  excess: number | null;
+}
+
+interface DrawdownSummary {
+  trough: number;
+  peakDate: string | null;
+  troughDate: string | null;
+  recoveryDate: string | null;
+  durationDays: number;
+  recoveryDays: number | null;
+  recovered: boolean;
 }
 
 interface Metrics {
   xirr: number | null;
-  maxDrawdown: number;
   volatility: number;
   sharpe: number | null;
+  sortino: number | null;
   winRate: { wins: number; total: number; rate: number };
   returns?: PeriodReturns;
+  benchmark?: BenchmarkSummary;
+  drawdown?: DrawdownSummary;
   underwater: { date: string; drawdown: number }[];
 }
 
@@ -48,13 +68,13 @@ interface Props {
 const UP = '#22c55e';
 const DOWN = '#ef4444';
 
-const pct = (v: number | null, sign = false) => {
+const pct = (v: number | null, sign = false): string => {
   if (v === null || !Number.isFinite(v)) return 'N/A';
   const s = sign && v > 0 ? '+' : '';
   return `${s}${(v * 100).toFixed(1)}%`;
 };
 
-export default function MetricsPanel({ portfolioId, refreshKey }: Props) {
+export default function MetricsPanel({ portfolioId, refreshKey }: Props): ReactElement {
   const [open, setOpen] = useState(false);
   const [data, setData] = useState<Metrics | null>(null);
   const [loading, setLoading] = useState(false);
@@ -85,7 +105,7 @@ export default function MetricsPanel({ portfolioId, refreshKey }: Props) {
     if (open) fetchData();
   }, [open, fetchData, refreshKey]);
 
-  const formatDate = (dateStr: string) => {
+  const formatDate = (dateStr: string): string => {
     const d = new Date(dateStr);
     return `${d.getMonth() + 1}/${d.getDate()}`;
   };
@@ -99,7 +119,7 @@ export default function MetricsPanel({ portfolioId, refreshKey }: Props) {
     active?: boolean;
     payload?: { value?: number }[];
     label?: string;
-  }) => {
+  }): ReactElement | null => {
     if (active && payload && payload.length) {
       return (
         <div className="bg-card border border-border rounded-lg p-2 shadow-lg">
@@ -147,37 +167,50 @@ export default function MetricsPanel({ portfolioId, refreshKey }: Props) {
             </div>
           ) : (
             <>
-              <ReturnsSection returns={data.returns} />
+              <ReturnsSection
+                returns={data.returns}
+                xirr={data.xirr}
+                benchmark={data.benchmark}
+              />
 
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-5">
-                <Metric
-                  label="年化報酬 (XIRR)"
-                  value={pct(data.xirr, true)}
-                  positive={data.xirr !== null && data.xirr >= 0}
-                />
-                <Metric label="最大回撤" value={pct(data.maxDrawdown)} positive={false} />
-                <Metric label="波動率 (年化)" value={pct(data.volatility)} />
-                <Metric
-                  label="Sharpe"
-                  value={data.sharpe === null ? 'N/A' : data.sharpe.toFixed(2)}
-                  positive={data.sharpe !== null && data.sharpe >= 1}
-                />
-                <Metric
-                  label="勝率"
-                  value={
-                    data.winRate.total > 0
-                      ? `${(data.winRate.rate * 100).toFixed(0)}%`
-                      : 'N/A'
-                  }
-                  sub={data.winRate.total > 0 ? `${data.winRate.wins}/${data.winRate.total}` : undefined}
-                />
-              </div>
+              <section className="mb-5">
+                <h3 className="text-sm font-semibold mb-3">風險與交易品質</h3>
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-3">
+                  <Metric label="年化波動率" value={pct(data.volatility)} />
+                  <Metric
+                    label="Sharpe"
+                    value={data.sharpe === null ? 'N/A' : data.sharpe.toFixed(2)}
+                    positive={data.sharpe !== null && data.sharpe >= 1}
+                  />
+                  <Metric
+                    label="Sortino"
+                    value={data.sortino === null ? 'N/A' : data.sortino.toFixed(2)}
+                    positive={data.sortino !== null && data.sortino >= 1}
+                  />
+                  <Metric
+                    label="勝率"
+                    value={
+                      data.winRate.total > 0
+                        ? `${(data.winRate.rate * 100).toFixed(0)}%`
+                        : 'N/A'
+                    }
+                    sub={
+                      data.winRate.total > 0
+                        ? `${data.winRate.wins}/${data.winRate.total}`
+                        : undefined
+                    }
+                  />
+                </div>
+              </section>
 
-              <div className="text-xs text-muted mb-2">
-                回撤走勢（underwater，谷底 {pct(trough)}）
-              </div>
+              <DrawdownHeader summary={data.drawdown} fallbackTrough={trough} />
               <div className="h-48">
-                <ResponsiveContainer width="100%" height="100%">
+                <ResponsiveContainer
+                  width="100%"
+                  height="100%"
+                  minWidth={0}
+                  initialDimension={{ width: 300, height: 192 }}
+                >
                   <AreaChart
                     data={data.underwater}
                     margin={{ top: 5, right: 20, left: 10, bottom: 5 }}
@@ -224,11 +257,19 @@ export default function MetricsPanel({ portfolioId, refreshKey }: Props) {
   );
 }
 
-// 報酬率區塊（TWR 累積）：Total / YTD hero + 各年度長條
-function ReturnsSection({ returns }: { returns?: PeriodReturns }) {
+// TWR 與 XIRR 分別回答策略表現、實際資金結果，不應混為單一報酬口徑。
+function ReturnsSection({
+  returns,
+  xirr,
+  benchmark,
+}: {
+  returns?: PeriodReturns;
+  xirr: number | null;
+  benchmark?: BenchmarkSummary;
+}): ReactElement | null {
   if (!returns || returns.total === null) return null;
 
-  const { total, ytd, years } = returns;
+  const { total, ytd, annualized, years } = returns;
   const firstDate = years[0]?.startDate;
   const currentYear = years[years.length - 1]?.year;
   const ytdStart = years[years.length - 1]?.startDate;
@@ -236,8 +277,8 @@ function ReturnsSection({ returns }: { returns?: PeriodReturns }) {
   return (
     <section className="mb-5">
       <div className="flex items-baseline justify-between gap-2 mb-3">
-        <h3 className="text-sm font-semibold">報酬率</h3>
-        <span className="text-xs text-muted">TWR 時間加權 · 累積</span>
+        <h3 className="text-sm font-semibold">報酬表現</h3>
+        <span className="text-xs text-muted">TWR · 時間加權</span>
       </div>
 
       <div className="grid grid-cols-2 gap-3 mb-4">
@@ -253,10 +294,77 @@ function ReturnsSection({ returns }: { returns?: PeriodReturns }) {
         />
       </div>
 
-      {years.length >= 2 && <YearReturnsChart years={years} />}
+      <BenchmarkComparison portfolioTotal={total} benchmark={benchmark} />
+      {years.length > 0 && <YearReturnsChart years={years} />}
+      <AnnualizedReturns twr={annualized} xirr={xirr} />
 
       <div className="border-t border-border mt-5" />
     </section>
+  );
+}
+
+function BenchmarkComparison({
+  portfolioTotal,
+  benchmark,
+}: {
+  portfolioTotal: number;
+  benchmark?: BenchmarkSummary;
+}): ReactElement | null {
+  if (!benchmark || benchmark.total === null) return null;
+  const values = [
+    { label: '投組 TWR', value: portfolioTotal },
+    { label: benchmark.name, value: benchmark.total },
+    { label: '超額報酬', value: benchmark.excess },
+  ];
+
+  return (
+    <div className="border-y border-border py-3 mb-4">
+      <div className="flex items-baseline justify-between gap-2 mb-2.5">
+        <h4 className="text-xs font-medium">同期基準比較</h4>
+        <span className="text-xs text-muted">累積 · TWD（含匯率）</span>
+      </div>
+      <div className="grid grid-cols-3 divide-x divide-border">
+        {values.map(({ label, value }) => (
+          <div key={label} className="min-w-0 px-2 first:pl-0 last:pr-0">
+            <p className="truncate text-xs text-muted">{label}</p>
+            <p
+              className={`mt-1 text-sm font-semibold tabular-nums ${
+                value === null ? 'text-foreground' : value >= 0 ? 'text-up' : 'text-down'
+              }`}
+            >
+              {pct(value, true)}
+            </p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function DrawdownHeader({
+  summary,
+  fallbackTrough,
+}: {
+  summary?: DrawdownSummary;
+  fallbackTrough: number;
+}): ReactElement {
+  const trough = summary?.trough ?? fallbackTrough;
+  const timing =
+    trough >= 0
+      ? '尚無回撤'
+      : summary?.recovered
+      ? `歷時 ${summary.durationDays} 天 · 谷底後 ${summary.recoveryDays ?? 0} 天復原`
+      : summary
+        ? `已持續 ${summary.durationDays} 天 · 尚未復原`
+        : null;
+
+  return (
+    <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 mb-2">
+      <h3 className="text-sm font-semibold">最大回撤走勢</h3>
+      <p className="text-xs text-muted tabular-nums">
+        {trough < 0 ? `谷底 ${pct(trough)}${timing ? ` · ${timing}` : ''}` : timing}
+      </p>
+    </div>
   );
 }
 
@@ -268,7 +376,7 @@ function HeroReturn({
   label: string;
   value: number | null;
   sub?: string;
-}) {
+}): ReactElement {
   const up = value !== null && value >= 0;
   return (
     <div className="bg-background border border-border rounded-xl p-4">
@@ -283,7 +391,54 @@ function HeroReturn({
   );
 }
 
-function YearReturnsChart({ years }: { years: YearReturn[] }) {
+function AnnualizedReturns({ twr, xirr }: { twr: number | null; xirr: number | null }): ReactElement {
+  return (
+    <div className="border-t border-border mt-4 pt-4">
+      <div className="flex items-baseline justify-between gap-2 mb-3">
+        <h4 className="text-sm font-semibold">年化報酬率</h4>
+        <span className="text-xs text-muted">兩種口徑，各自保留</span>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <AnnualizedReturn
+          label="TWR 年化"
+          value={twr}
+          description="策略表現 · 排除資金進出"
+        />
+        <AnnualizedReturn
+          label="XIRR 年化"
+          value={xirr}
+          description="實際資金 · 納入金額與時點"
+        />
+      </div>
+      <p className="text-xs leading-5 text-muted mt-2.5">
+        比較投資策略看 TWR；檢視個人實際成果看 XIRR。兩者不同屬正常現象。
+      </p>
+    </div>
+  );
+}
+
+function AnnualizedReturn({
+  label,
+  value,
+  description,
+}: {
+  label: string;
+  value: number | null;
+  description: string;
+}): ReactElement {
+  const up = value !== null && value >= 0;
+  return (
+    <div className="min-w-0 rounded-lg border border-border bg-background p-3 sm:p-4">
+      <p className="text-xs text-muted mb-1">{label}</p>
+      <p className={`text-xl font-bold tabular-nums ${up ? 'text-up' : 'text-down'}`}>
+        {pct(value, true)}
+      </p>
+      <p className="text-xs leading-4 text-muted mt-1.5">{description}</p>
+    </div>
+  );
+}
+
+function YearReturnsChart({ years }: { years: YearReturn[] }): ReactElement {
   const values = years.map((y) => y.return);
   const max = Math.max(0, ...values);
   const min = Math.min(0, ...values);
@@ -292,9 +447,17 @@ function YearReturnsChart({ years }: { years: YearReturn[] }) {
 
   return (
     <div>
-      <div className="text-xs text-muted mb-2">各年度報酬</div>
+      <div className="flex items-baseline justify-between gap-2 text-xs text-muted mb-2">
+        <span>各年度報酬（TWR）</span>
+        <span>今年為 YTD</span>
+      </div>
       <div className="h-52">
-        <ResponsiveContainer width="100%" height="100%">
+        <ResponsiveContainer
+          width="100%"
+          height="100%"
+          minWidth={0}
+          initialDimension={{ width: 300, height: 208 }}
+        >
           <BarChart
             data={years}
             margin={{ top: 22, right: 8, left: 8, bottom: 4 }}
@@ -330,7 +493,7 @@ function YearReturnsChart({ years }: { years: YearReturn[] }) {
 function YearBarLabel(props: {
   value?: number;
   viewBox?: { x?: number; y?: number; width?: number; height?: number };
-}) {
+}): ReactElement | null {
   const { value, viewBox } = props;
   if (value === undefined || !viewBox) return null;
   const { x, y, width, height } = viewBox;
@@ -361,7 +524,7 @@ function YearTooltip({
 }: {
   active?: boolean;
   payload?: { payload?: YearReturn }[];
-}) {
+}): ReactElement | null {
   if (active && payload && payload.length && payload[0].payload) {
     const y = payload[0].payload;
     const up = y.return >= 0;
@@ -389,13 +552,13 @@ function Metric({
   value: string;
   sub?: string;
   positive?: boolean;
-}) {
+}): ReactElement {
   const color =
     positive === undefined ? 'text-foreground' : positive ? 'text-up' : 'text-down';
   return (
-    <div className="bg-background border border-border rounded-lg p-3">
+    <div className="min-w-0 bg-background border border-border rounded-lg p-2.5 sm:p-3">
       <p className="text-xs text-muted mb-1">{label}</p>
-      <p className={`text-lg font-bold ${color}`}>{value}</p>
+      <p className={`text-base sm:text-lg font-bold tabular-nums ${color}`}>{value}</p>
       {sub && <p className="text-xs text-muted mt-0.5">{sub}</p>}
     </div>
   );

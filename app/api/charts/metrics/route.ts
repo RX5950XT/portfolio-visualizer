@@ -2,10 +2,15 @@ import { NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase';
 import { getUserRole, getVisiblePortfolioIdsForRole } from '@/lib/auth';
 import { buildEquityCurve, type EquityLot } from '@/lib/equity-curve';
+import { buildDenseRateMap } from '@/lib/portfolio-history';
+import { fetchHistory } from '@/lib/stocks';
 import {
-  maxDrawdown,
+  benchmarkExcessReturn,
+  drawdownStats,
   drawdownSeries,
   annualizedVolatility,
+  sharpeRatio,
+  sortinoRatio,
   xirr,
   winRate,
   periodReturns,
@@ -25,7 +30,23 @@ interface SellTxRow {
   realized_pnl_twd: number | null;
 }
 
-// GET: 計算進階績效指標（XIRR / 最大回撤 / 波動率 / Sharpe / 勝率）+ underwater 序列
+interface PricePoint {
+  date: string;
+  close: number;
+}
+
+function buildBenchmarkValues(
+  history: PricePoint[],
+  dates: string[],
+  rates: Map<string, number>
+): number[] {
+  if (history.length === 0) return [];
+  const sparsePrices = new Map(history.map((point) => [point.date, point.close]));
+  const densePrices = buildDenseRateMap(sparsePrices, dates);
+  return dates.map((date) => (densePrices.get(date) ?? 0) * (rates.get(date) ?? 32));
+}
+
+// GET: 計算進階績效指標（TWR / XIRR / 波動率 / Sharpe / 勝率）+ underwater 序列
 export async function GET(request: Request) {
   try {
     const role = await getUserRole();
@@ -98,14 +119,18 @@ export async function GET(request: Request) {
       realized_pnl_twd: number | null;
     }[];
 
-    const curve = await buildEquityCurve(
-      holdings as EquityLot[],
-      sellRows.map((s) => ({
-        holding_id: s.holding_id,
-        shares: s.shares,
-        transaction_date: s.transaction_date,
-      }))
-    );
+    const earliestDate = holdings[0].purchase_date;
+    const [curve, benchmarkHistory] = await Promise.all([
+      buildEquityCurve(
+        holdings as EquityLot[],
+        sellRows.map((s) => ({
+          holding_id: s.holding_id,
+          shares: s.shares,
+          transaction_date: s.transaction_date,
+        }))
+      ),
+      fetchHistory('^GSPC', { startDate: earliestDate }),
+    ]);
 
     if (curve.values.length < 2) return NextResponse.json({ data: null });
 
@@ -162,15 +187,28 @@ export async function GET(request: Request) {
     const vol = annualizedVolatility(twrIndex);
     const annualReturn = xirr(flows);
     const ddSeries = drawdownSeries(twrIndex);
+    const returns = periodReturns(curve.dates, twrIndex);
+    const benchmarkValues = buildBenchmarkValues(
+      benchmarkHistory,
+      curve.dates,
+      curve.denseRateMap
+    );
+    const benchmarkReturn = periodReturns(curve.dates, benchmarkValues).total;
 
     const data = {
       xirr: annualReturn,
-      maxDrawdown: maxDrawdown(twrIndex),
       volatility: vol,
-      sharpe: annualReturn !== null && vol > 0 ? (annualReturn - RISK_FREE) / vol : null,
+      sharpe: sharpeRatio(twrIndex, RISK_FREE),
+      sortino: sortinoRatio(twrIndex, RISK_FREE),
       winRate: winRate([...pnlByDecision.values()]),
       // 期間報酬率（TWR 累積）：Total / YTD / 各曆年，複用同一條 twrIndex
-      returns: periodReturns(curve.dates, twrIndex),
+      returns,
+      benchmark: {
+        name: 'S&P 500',
+        total: benchmarkReturn,
+        excess: benchmarkExcessReturn(returns.total, benchmarkReturn),
+      },
+      drawdown: drawdownStats(curve.dates, ddSeries),
       underwater: curve.dates.map((date, i) => ({ date, drawdown: ddSeries[i] })),
     };
 

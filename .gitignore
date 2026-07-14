@@ -13,6 +13,10 @@
 # testing
 /coverage
 
+# browser automation artifacts
+/.playwright-cli/
+/output/
+
 # next.js
 /.next/
 /out/
@@ -42,9 +46,5 @@ next-env.d.ts
 
 .vercel
 
-# local docs (not committed to repo)
-/docs
-
-# AI 工作產物（本機交接/規劃，不進 repo）
-/tasks
+# 本機上下文
 /CONTEXT.md

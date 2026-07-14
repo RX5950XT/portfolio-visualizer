@@ -22,7 +22,7 @@
 ### 🧠 進階洞察
 - **AI 投資組合健診**（`/insights`）：串接 OpenRouter，由 LLM 分析集中度風險、ETF 重疊、費用拖累並給出可執行的再平衡建議（串流輸出、Markdown 渲染）。模型與金鑰由 `/settings` 自行設定。
 - **配置透視 / 揭穿真實重倉**（`/insights`）：穿透 ETF 持股（Yahoo `topHoldings`），合併「直接持有 + 透過 ETF」算出真實重倉 Top 10，單一標的 >10% 標記 ⚠️，並呈現產業 / 地區分佈。
-- **進階績效指標**（dashboard 摺疊區）：XIRR（金額加權年化）、最大回撤、年化波動率、Sharpe、勝率，附 underwater 回撤走勢圖。
+- **績效分析**（dashboard 摺疊區）：TWR 累積、YTD、年度與年化報酬，並列 XIRR 個人資金年化；另含 S&P 500 超額報酬、年化波動率、Sharpe、Sortino、勝率，以及回撤歷時與復原資訊。
 - **配息追蹤**（`/dividends`）：近 12 月配息、預估年配息、殖利率與殖利率@成本、即將除息清單（美股經匯率換算 TWD）。
 
 ### 🌍 全球市場支援
@@ -158,7 +158,7 @@ portfolio-app/
 │   ├── stocks.ts           # 股價 / 匯率 / 配息 API 封裝
 │   ├── yahoo-crumb.ts      # Yahoo quoteSummary crumb 認證
 │   ├── etf-holdings.ts     # ETF 持股穿透
-│   ├── metrics.ts          # XIRR / 回撤 / 波動率 / Sharpe / 勝率
+│   ├── metrics.ts          # TWR / XIRR / 基準超額 / 回撤 / 風險指標
 │   ├── equity-curve.ts     # 每日權益曲線建構
 │   ├── portfolio-context.ts# AI 健診的組合資料整理
 │   └── portfolio-history.ts# 回溯持股數 / 密集匯率
