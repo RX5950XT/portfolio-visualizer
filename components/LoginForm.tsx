@@ -94,9 +94,11 @@ export default function LoginForm({ demoEnabled }: LoginFormProps) {
 
         {demoEnabled && (
           <p className="text-muted text-xs text-center mt-4">
-            想先體驗？輸入{' '}
-            <code className="text-foreground/80">demo</code> 進入展示空間 —
-            專屬沙盒、隨你操作，不影響真實資料
+            輸入{' '}
+            <strong className="font-bold text-foreground tracking-wide">
+              demo
+            </strong>{' '}
+            進入展示空間 — 專屬沙盒、隨你操作
           </p>
         )}
       </div>
