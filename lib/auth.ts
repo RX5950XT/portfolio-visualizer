@@ -2,6 +2,11 @@ import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { createServerClient } from '@/lib/supabase';
 import {
+  DEMO_PASSWORD,
+  getAuthConfig,
+  verifyPasswordHash,
+} from '@/lib/auth-config';
+import {
   AUTH_COOKIE_NAME,
   createAuthToken,
   maxAgeForRole,
@@ -14,22 +19,39 @@ import {
 export type { UserRole, Session };
 
 // 驗證密碼並回傳角色
-// Why: 使用定時間比對避免時序攻擊；雖在 Node.js 實務上利用機率低，但成本極低值得加
-export function verifyPassword(password: string): UserRole | null {
+// Why: DB 有雜湊以 DB 為準；null 才回退 env（首次引導）。demo 為公開常數 + 開關。
+export async function verifyPassword(
+  password: string
+): Promise<UserRole | null> {
   if (typeof password !== 'string' || password.length === 0) return null;
 
-  const adminPassword = process.env.SITE_PASSWORD;
-  const guestPassword = process.env.GUEST_PASSWORD;
-  const demoPassword = process.env.DEMO_PASSWORD;
+  const config = await getAuthConfig();
 
-  if (!adminPassword) {
-    console.warn('SITE_PASSWORD 環境變數未設定');
-    return null;
+  if (config.admin) {
+    if (verifyPasswordHash(password, config.admin)) return 'admin';
+  } else {
+    const adminPassword = process.env.SITE_PASSWORD;
+    if (!adminPassword) {
+      console.warn(
+        'SITE_PASSWORD 環境變數未設定，且資料庫尚未設定管理員密碼'
+      );
+    } else if (timingSafeEqual(password, adminPassword)) {
+      return 'admin';
+    }
   }
 
-  if (timingSafeEqual(password, adminPassword)) return 'admin';
-  if (guestPassword && timingSafeEqual(password, guestPassword)) return 'guest';
-  if (demoPassword && timingSafeEqual(password, demoPassword)) return 'demo';
+  if (config.guest) {
+    if (verifyPasswordHash(password, config.guest)) return 'guest';
+  } else {
+    const guestPassword = process.env.GUEST_PASSWORD;
+    if (guestPassword && timingSafeEqual(password, guestPassword)) {
+      return 'guest';
+    }
+  }
+
+  if (config.demoEnabled && timingSafeEqual(password, DEMO_PASSWORD)) {
+    return 'demo';
+  }
 
   return null;
 }

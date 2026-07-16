@@ -22,7 +22,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: '請輸入密碼' }, { status: 400 });
     }
 
-    const role = verifyPassword(password);
+    const role = await verifyPassword(password);
 
     if (!role) {
       await sleep(FAILED_LOGIN_DELAY_MS);

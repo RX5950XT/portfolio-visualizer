@@ -26,6 +26,7 @@
 - RLS 啟用但**禁用 `USING(true)`**；不開放就不建 policy（RLS on + 無 policy = 預設拒絕）。
 - 新表上線：用 anon key 打 `GET /rest/v1/<table>` **必須回 401** 才算安全。
 - OpenRouter Key 存 `app_settings`（僅 service_role）、遮罩、永不回前端；secrets 一律環境變數或 DB，不硬編碼，`.env*` 不進 git。
+- **登入密碼**以 scrypt 雜湊存 `app_settings.auth_config`（`lib/auth-config.ts`）；`SITE_PASSWORD`/`GUEST_PASSWORD` 僅首次引導，DB 有雜湊後 env 失效。Demo 密碼為公開常數 `demo`，開關存同 key。改密碼必須先驗證目前 admin 密碼；`/api/settings/auth` 永不回 salt/hash。
 - 認證走 HMAC 簽章 cookie；三種角色 `admin`／`guest`／`demo`。寫入端點 `requireWriteSession()`（放行 admin/demo、擋 guest），讀取端點套訪客可見性過濾；AI 與設定端點維持 admin 專屬。
 - **Demo 沙盒鐵則**：`portfolios`/`holdings`/`cash_balance`/`transactions` 帶 `demo_space`（真實資料為 NULL）。
   這 4 表的每個 SELECT/UPDATE/DELETE **一律經 `scopeQuery(query, session)`**、每個 INSERT **一律併入 `stampSpace(session)`**——這是隔離的唯一真相來源，漏一處就是資料外洩或誤刪。

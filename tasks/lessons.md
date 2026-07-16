@@ -22,7 +22,26 @@ anon 權限是「完全未使用」且致命的開口。
    本 app 不是那種架構，正解是「兩者都不給 anon」。
 5. `app_settings`（含 OpenRouter key）是唯一做對的範本：只 GRANT service_role + RLS on 無 policy。
 
+## 2026-07-16 — Vercel env var 兩個雷：部署後才注入 + PowerShell pipe 帶 CRLF
+
+**事發**：Demo 空間上線後正式站登入 `demo` 一直 401。先發現 `DEMO_PASSWORD` 加在「已部署」之後不生效；
+改用 PowerShell pipe（`'demo' | vercel env add ...`）補上後仍 401。
+
+**根因**：
+1. Vercel 環境變數在**建立部署當下**注入 runtime；事後改 env **必須重新部署**才會進到跑中的 function。
+2. PowerShell 對 pipe 預設用 CRLF，`'demo' | vercel env add` 實際存進去是 `demo\r\n`。
+   `timingSafeEqual` 長度不符 → 永遠比對失敗。
+
+**修正**：用 `vercel env add X <env> --value <v> --yes`（不要 pipe）；加完 env 後 `vercel redeploy`；
+本輪起 Demo 改為公開常數 `demo` + DB 開關，不再依賴 `DEMO_PASSWORD` env。
+
+**規則（往後一律遵守）**：
+1. 加／改／刪 Vercel env 後**一定重新部署**（`vercel redeploy <url>` 或新 push）。
+2. 設 env 值一律 `vercel env add NAME env --value VALUE --yes`，**絕不用 pipe**。
+3. 懷疑髒字元時用 `vercel env pull` 再以能顯示控制字元的方式檢查實際位元組（勿只看 Dashboard 顯示）。
+
 ## 2026-07-09 — `next build` 與 `next dev` 共用 `.next`，造成瀏覽器狂 reload（F5 loop）
+
 
 **事發**：驗證新功能時，在 `npm run dev` 仍在跑的情況下又跑了 `npm run build`。`next build` 重寫了
 `.next/`，把運行中的 Turbopack dev server 快取洗壞 → 每次請求 `/` 都噴 `FATAL ... Next.js package not found`

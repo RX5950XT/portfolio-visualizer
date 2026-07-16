@@ -32,7 +32,7 @@
 ### 🛡️ 安全與權限（RBAC）
 - **Admin（管理員）**：完整讀寫權限，可執行所有操作（含 AI 健診與設定）。
 - **Guest（訪客）**：唯讀模式，僅能看到管理員開放的投資組合。
-- **Demo（試玩沙盒）**：輸入 `DEMO_PASSWORD` 進入**每人專屬的獨立沙盒**，可自由增刪改體驗，
+- **Demo（試玩沙盒）**：輸入公開密碼 `demo` 進入**每人專屬的獨立沙盒**（可於 `/settings` 開關），可自由增刪改體驗，
   碰不到管理員與訪客的任何資料；預設種子為「一年前各投入 NT$50 萬買 VT 與 0050」，24 小時後自動重置。不提供 AI 健診與設定。
 - **HMAC 簽章 Cookie**：認證 token 採 HMAC-SHA256 簽章，無法手動偽造（demo 的沙盒 id 亦納入簽章）。
 - **訪客可見性控制**：每個投資組合可獨立設定是否對訪客開放。
@@ -76,15 +76,13 @@ npm install
 # 產生方式：openssl rand -hex 32
 AUTH_SECRET=your_64_char_hex_secret_here
 
-# 管理員密碼（強密碼，建議 16+ 字元）
+# 管理員密碼（首次引導用；於 /settings 設定後以資料庫 scrypt 雜湊為準）
 SITE_PASSWORD=your_admin_password
 
-# 訪客密碼（可選；不設定則不開放訪客模式）
+# 訪客密碼（可選；首次引導用，之後可於 /settings 修改）
 GUEST_PASSWORD=your_guest_password
 
-# Demo 沙盒密碼（可選；不設定則不開放 demo 空間）
-# 此密碼供公開分享試玩，輸入後進入獨立沙盒，碰不到真實資料
-DEMO_PASSWORD=demo
+# Demo 空間：公開密碼固定為 demo，啟用狀態存於資料庫（/settings 可開關）
 
 # ── Supabase ───────────────────────────────────────────────────────
 NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
@@ -94,7 +92,9 @@ SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 
 > **⚠️ 重要**：`AUTH_SECRET` 未設定或長度不足 32 字元時，應用程式會在登入時直接報錯。Vercel 部署也需在 Dashboard → Settings → Environment Variables 設定相同值。
 >
-> OpenRouter API Key **不放環境變數**；登入後於 `/settings` 頁填入，存於資料庫（僅 service_role 可讀、永不回傳前端）。
+> `SITE_PASSWORD` / `GUEST_PASSWORD` 僅作**首次引導**：管理員於 `/settings` 設定密碼後，以資料庫雜湊為準，env 即失效。OpenRouter API Key **不放環境變數**；登入後於 `/settings` 填入，存於資料庫（僅 service_role 可讀、永不回傳前端）。
+>
+> **忘記密碼**：到 Supabase 刪除 `app_settings` 中 `key = 'auth_config'` 的列，即可回到 env 引導密碼登入。
 
 ### 4. 初始化資料庫
 前往 Supabase SQL Editor，依下列順序執行（含相依關係）：
@@ -160,6 +160,7 @@ portfolio-app/
 ├── lib/
 │   ├── auth-token.ts       # Edge-safe HMAC token（middleware 用）
 │   ├── auth.ts             # Cookie 管理 + 訪客可見性過濾 + demo 沙盒隔離（scopeQuery / stampSpace）
+│   ├── auth-config.ts      # 登入密碼 scrypt 雜湊讀寫（app_settings.auth_config）
 │   ├── demo-seed.ts        # Demo 沙盒種子（VT/0050）與過期清理
 │   ├── supabase.ts         # Supabase Client 初始化（anon / service_role）
 │   ├── ai-config.ts        # OpenRouter 設定讀寫 + 金鑰遮罩
@@ -184,9 +185,10 @@ portfolio-app/
 - **資料庫存取收斂**：所有資料表**僅** GRANT 給 `service_role`，**不開放** `anon`/`authenticated`；app 一律經伺服器端 service_role 存取。如此即使公開的 anon key 外流，未登入者打 Data API 也只會得到 `401`，無法繞過密碼直讀資料。
 - **RLS 預設拒絕**：資料表啟用 RLS 但不建立寬鬆 policy（禁用 `USING(true)`）；service_role 不受 RLS 限制，app 正常運作。
 - **OpenRouter Key 保護**：金鑰存於 `app_settings`（僅 service_role），僅伺服器端使用；API 回前端一律遮罩（`sk-or-…abcd`），永不回傳明文。
+- **登入密碼雜湊**：管理員／訪客密碼以 scrypt 存 `app_settings.auth_config`（salt+hash）；env 僅首次引導。Demo 公開密碼固定 `demo`，開關存同 key。GET 永不回傳 salt/hash。
 - **訪客隔離**：API 層強制過濾，訪客只能讀取 `visible_to_guest = true` 的組合。
 - **Demo 沙盒隔離**：4 張資料表帶 `demo_space`（真實資料為 NULL）。所有查詢經 `scopeQuery` 統一套述詞——admin/guest 查 `demo_space IS NULL`、demo 查 `= 自己的 space`。因此 demo 就算帶著真實資料的 row id 打寫入端點，也只會匹配 0 筆而無效（安全 by construction）。
-- **密碼比對**：使用定時間比對（timing-safe）避免時序攻擊。
+- **密碼比對**：env 明文用字串 timing-safe；DB 雜湊用 Buffer timing-safe 比對 scrypt 結果。
 - **失敗延遲**：登入失敗固定延遲 400ms 阻擋快速暴力破解（正式環境建議於 Vercel 邊界再加 rate limit）。
 
 ---
