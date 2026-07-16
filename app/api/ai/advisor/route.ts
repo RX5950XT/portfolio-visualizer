@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getUserRole, getVisiblePortfolioIdsForRole } from '@/lib/auth';
+import { getSession, getVisiblePortfolioIdsForRole } from '@/lib/auth';
 import { getAiConfig } from '@/lib/ai-config';
 import { buildPortfolioContext, type PortfolioContext } from '@/lib/portfolio-context';
 
@@ -89,8 +89,9 @@ function toTextStream(upstream: ReadableStream<Uint8Array>): ReadableStream<Uint
 
 // POST: 產生 AI 投資組合健診（串流）
 export async function POST(request: Request) {
-  const role = await getUserRole();
-  if (role !== 'admin') {
+  // AI 健診維持 admin 專屬：demo 角色在此自動被擋（避免陌生訪客耗用 OpenRouter 額度）
+  const session = await getSession();
+  if (session?.role !== 'admin') {
     return NextResponse.json({ error: '無權限執行此操作' }, { status: 403 });
   }
 
@@ -106,12 +107,12 @@ export async function POST(request: Request) {
     const body = await request.json().catch(() => ({}));
     const portfolioId: string | null = body?.portfolioId ?? null;
 
-    const visibleIds = await getVisiblePortfolioIdsForRole(role);
+    const visibleIds = await getVisiblePortfolioIdsForRole(session);
     if (visibleIds !== null && portfolioId && !visibleIds.includes(portfolioId)) {
       return NextResponse.json({ error: '無權限檢視此投資組合' }, { status: 403 });
     }
 
-    const ctx = await buildPortfolioContext(portfolioId, visibleIds);
+    const ctx = await buildPortfolioContext(portfolioId, visibleIds, session);
     if (ctx.holdings.length === 0) {
       return NextResponse.json({ error: '此投資組合尚無持股可分析' }, { status: 400 });
     }

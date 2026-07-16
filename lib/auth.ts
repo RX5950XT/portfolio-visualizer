@@ -1,15 +1,17 @@
+import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { createServerClient } from '@/lib/supabase';
 import {
   AUTH_COOKIE_NAME,
-  COOKIE_MAX_AGE_SECONDS,
   createAuthToken,
+  maxAgeForRole,
   timingSafeEqual,
   verifyAuthToken,
+  type Session,
   type UserRole,
 } from '@/lib/auth-token';
 
-export type { UserRole };
+export type { UserRole, Session };
 
 // 驗證密碼並回傳角色
 // Why: 使用定時間比對避免時序攻擊；雖在 Node.js 實務上利用機率低，但成本極低值得加
@@ -18,6 +20,7 @@ export function verifyPassword(password: string): UserRole | null {
 
   const adminPassword = process.env.SITE_PASSWORD;
   const guestPassword = process.env.GUEST_PASSWORD;
+  const demoPassword = process.env.DEMO_PASSWORD;
 
   if (!adminPassword) {
     console.warn('SITE_PASSWORD 環境變數未設定');
@@ -26,19 +29,24 @@ export function verifyPassword(password: string): UserRole | null {
 
   if (timingSafeEqual(password, adminPassword)) return 'admin';
   if (guestPassword && timingSafeEqual(password, guestPassword)) return 'guest';
+  if (demoPassword && timingSafeEqual(password, demoPassword)) return 'demo';
 
   return null;
 }
 
 // 設定認證 Cookie（HMAC 簽章 token）
-export async function setAuthCookie(role: UserRole): Promise<void> {
-  const token = await createAuthToken(role);
+export async function setAuthCookie(
+  role: UserRole,
+  demoSpace?: string | null
+): Promise<void> {
+  const token = await createAuthToken(role, demoSpace);
   const cookieStore = await cookies();
   cookieStore.set(AUTH_COOKIE_NAME, token, {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'lax',
-    maxAge: COOKIE_MAX_AGE_SECONDS,
+    // demo cookie 只活 24h，與沙盒清理週期一致
+    maxAge: maxAgeForRole(role),
     path: '/',
   });
 }
@@ -49,34 +57,93 @@ export async function clearAuthCookie(): Promise<void> {
   cookieStore.delete(AUTH_COOKIE_NAME);
 }
 
-// 取得當前用戶角色（驗證簽章）
-export async function getUserRole(): Promise<UserRole | null> {
+// 取得當前 session（驗證簽章）
+export async function getSession(): Promise<Session | null> {
   const cookieStore = await cookies();
   const token = cookieStore.get(AUTH_COOKIE_NAME)?.value;
   return verifyAuthToken(token);
 }
 
-export async function isAuthenticated(): Promise<boolean> {
-  const role = await getUserRole();
-  return role !== null;
+// 取得當前用戶角色（驗證簽章）
+export async function getUserRole(): Promise<UserRole | null> {
+  const session = await getSession();
+  return session?.role ?? null;
 }
 
-// 取得「對訪客可見」的投資組合 ID 清單
+export async function isAuthenticated(): Promise<boolean> {
+  return (await getSession()) !== null;
+}
+
+// --- Demo 沙盒隔離 ---
+//
+// 隔離契約：admin/guest 只看真實資料（demo_space IS NULL）、demo 只看自己沙盒。
+// 所有對 portfolios/holdings/cash_balance/transactions 的 SELECT/UPDATE/DELETE
+// 都必須經過 scopeQuery，INSERT 都必須併入 stampSpace——這是隔離的唯一真相來源。
+
+interface SpaceScopable {
+  eq(column: string, value: string): SpaceScopable;
+  is(column: string, value: null): SpaceScopable;
+}
+
+// 對 query 追加沙盒述詞。
+// Why: [id] 寫入因此安全 by construction——demo 改到真實資料的 row 會匹配 0 筆而無效，
+//      不需另外查歸屬；反之 admin 的述詞也永遠命中不了 demo 列。
+//
+// T 刻意不加約束：用 `T extends SpaceScopable<T>` 或 polymorphic `this` 約束時，
+// TS 展開 PostgrestFilterBuilder 會觸發 TS2589（型別實例化過深）。
+// 轉型收斂在此函式內部一處，呼叫端仍保有完整的 query builder 型別推論。
+export function scopeQuery<T>(query: T, session: Session): T {
+  const scopable = query as SpaceScopable;
+  const scoped =
+    session.demoSpace !== null
+      ? scopable.eq('demo_space', session.demoSpace)
+      : scopable.is('demo_space', null);
+  return scoped as T;
+}
+
+// INSERT 時標記所屬沙盒；admin/guest 留 NULL（真實資料）
+export function stampSpace(session: Session): { demo_space?: string } {
+  return session.demoSpace !== null ? { demo_space: session.demoSpace } : {};
+}
+
+type WriteAuth =
+  | { ok: true; session: Session }
+  | { ok: false; response: NextResponse };
+
+// 寫入權限：admin 寫真實資料、demo 寫自己沙盒；guest 唯讀
+export async function requireWriteSession(): Promise<WriteAuth> {
+  const session = await getSession();
+  if (!session) {
+    return { ok: false, response: NextResponse.json({ error: '未授權' }, { status: 401 }) };
+  }
+  if (session.role === 'guest') {
+    return {
+      ok: false,
+      response: NextResponse.json({ error: '無權限執行此操作' }, { status: 403 }),
+    };
+  }
+  return { ok: true, session };
+}
+
+// 取得「對當前 session 可見」的投資組合 ID 清單
 // Why: 訪客模式下，holdings/transactions/cash/charts 等 API 必須以此過濾，
 //      避免訪客直接用 portfolio_id 讀取隱藏組合的資料
 // 回傳值：
-//   - admin：null（代表不過濾，全部可見）
+//   - admin：null（不靠 id 清單，由 scopeQuery 排除 demo 列）
+//   - demo： null（同上，沙盒邊界由 scopeQuery 的 demo_space 述詞保證）
 //   - guest：string[] 可見組合 UUID
 export async function getVisiblePortfolioIdsForRole(
-  role: UserRole
+  session: Session
 ): Promise<string[] | null> {
-  if (role === 'admin') return null;
+  if (session.role !== 'guest') return null;
 
   const supabase = createServerClient();
   const { data, error } = await supabase
     .from('portfolios')
     .select('id')
-    .eq('visible_to_guest', true);
+    .eq('visible_to_guest', true)
+    // demo 建立的組合 visible_to_guest 預設為 TRUE，不排除會汙染訪客可見清單
+    .is('demo_space', null);
 
   if (error) {
     console.error('取得訪客可見組合失敗:', error);

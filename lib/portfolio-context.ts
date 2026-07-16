@@ -1,4 +1,5 @@
 import { createServerClient } from '@/lib/supabase';
+import { scopeQuery, type Session } from '@/lib/auth';
 import { fetchMultipleQuotes, fetchExchangeRate } from '@/lib/stocks';
 
 interface HoldingRow {
@@ -33,11 +34,15 @@ export interface PortfolioContext {
 // 組裝投資組合快照（同標的多批次合併），供 AI 顧問或洞察頁使用
 export async function buildPortfolioContext(
   portfolioId: string | null,
-  visibleIds: string[] | null
+  visibleIds: string[] | null,
+  session: Session
 ): Promise<PortfolioContext> {
   const supabase = createServerClient();
 
-  let query = supabase.from('holdings').select('symbol, shares, cost_price, market').gt('shares', 0);
+  let query = scopeQuery(
+    supabase.from('holdings').select('symbol, shares, cost_price, market').gt('shares', 0),
+    session
+  );
   if (portfolioId) {
     query = query.eq('portfolio_id', portfolioId);
   } else if (visibleIds !== null) {
@@ -47,7 +52,10 @@ export async function buildPortfolioContext(
     query = query.in('portfolio_id', visibleIds);
   }
 
-  let cashQuery = supabase.from('cash_balance').select('amount_twd, portfolio_id');
+  let cashQuery = scopeQuery(
+    supabase.from('cash_balance').select('amount_twd, portfolio_id'),
+    session
+  );
   if (portfolioId) {
     cashQuery = cashQuery.eq('portfolio_id', portfolioId);
   } else if (visibleIds !== null) {

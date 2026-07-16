@@ -1,35 +1,32 @@
 import { NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase';
-import { getUserRole, getVisiblePortfolioIdsForRole } from '@/lib/auth';
-
-// 權限檢查輔助函式
-async function requireAdmin() {
-  const role = await getUserRole();
-  if (role !== 'admin') {
-    return NextResponse.json({ error: '無權限執行此操作' }, { status: 403 });
-  }
-  return null;
-}
+import {
+  getSession,
+  getVisiblePortfolioIdsForRole,
+  requireWriteSession,
+  scopeQuery,
+  stampSpace,
+} from '@/lib/auth';
 
 // GET: 取得現金餘額
 export async function GET(request: Request) {
   try {
-    const role = await getUserRole();
-    if (!role) {
+    const session = await getSession();
+    if (!session) {
       return NextResponse.json({ error: '未授權' }, { status: 401 });
     }
 
     const { searchParams } = new URL(request.url);
     const portfolioId = searchParams.get('portfolio_id');
 
-    const visibleIds = await getVisiblePortfolioIdsForRole(role);
+    const visibleIds = await getVisiblePortfolioIdsForRole(session);
     if (visibleIds !== null && portfolioId && !visibleIds.includes(portfolioId)) {
       return NextResponse.json({ error: '無權限檢視此投資組合' }, { status: 403 });
     }
 
     const supabase = createServerClient();
 
-    let query = supabase.from('cash_balance').select('*');
+    let query = scopeQuery(supabase.from('cash_balance').select('*'), session);
 
     if (portfolioId) {
       query = query.eq('portfolio_id', portfolioId);
@@ -61,9 +58,9 @@ export async function GET(request: Request) {
 // PUT: 更新現金餘額
 export async function PUT(request: Request) {
   try {
-    // 權限檢查：只有管理員可以更新現金餘額
-    const forbidden = await requireAdmin();
-    if (forbidden) return forbidden;
+    const auth = await requireWriteSession();
+    if (!auth.ok) return auth.response;
+    const { session } = auth;
 
     const body = await request.json();
     const { amount_twd, portfolio_id } = body;
@@ -75,7 +72,7 @@ export async function PUT(request: Request) {
     const supabase = createServerClient();
 
     // 先嘗試查詢現有記錄
-    let query = supabase.from('cash_balance').select('id');
+    let query = scopeQuery(supabase.from('cash_balance').select('id'), session);
     if (portfolio_id) {
       query = query.eq('portfolio_id', portfolio_id);
     }
@@ -89,18 +86,24 @@ export async function PUT(request: Request) {
     let result;
     if (existingData) {
       // 更新現有記錄
-      result = await supabase
-        .from('cash_balance')
-        .update({
-          amount_twd,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', existingData.id)
+      result = await scopeQuery(
+        supabase
+          .from('cash_balance')
+          .update({
+            amount_twd,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', existingData.id),
+        session
+      )
         .select()
         .single();
     } else {
       // 新增記錄
-      const insertData: { amount_twd: number; portfolio_id?: string } = { amount_twd };
+      const insertData: { amount_twd: number; portfolio_id?: string; demo_space?: string } = {
+        amount_twd,
+        ...stampSpace(session),
+      };
       if (portfolio_id) {
         insertData.portfolio_id = portfolio_id;
       }

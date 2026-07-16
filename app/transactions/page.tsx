@@ -17,8 +17,9 @@ function TransactionsContent() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [userRole, setUserRole] = useState<'admin' | 'guest' | null>(null);
-  const isAdmin = userRole === 'admin';
+  const [userRole, setUserRole] = useState<'admin' | 'guest' | 'demo' | null>(null);
+  // demo 可自由編輯自己的沙盒
+  const canEdit = userRole === 'admin' || userRole === 'demo';
 
   // 刪除確認對話框（一次賣出可能對應多筆 tx，故存 id 陣列）
   const [deleteConfirm, setDeleteConfirm] = useState<{
@@ -240,9 +241,9 @@ function TransactionsContent() {
         <h2 className="text-lg font-semibold mb-4">賣出明細</h2>
         <TransactionList
           transactions={sellTransactions}
-          onDelete={isAdmin ? handleDeleteClick : undefined}
-          onEditNotes={isAdmin ? handleEditNotesClick : undefined}
-          readOnly={!isAdmin}
+          onDelete={canEdit ? handleDeleteClick : undefined}
+          onEditNotes={canEdit ? handleEditNotesClick : undefined}
+          readOnly={!canEdit}
         />
       </div>
 

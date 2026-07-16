@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase';
-import { getUserRole, getVisiblePortfolioIdsForRole } from '@/lib/auth';
+import { getSession, getVisiblePortfolioIdsForRole, scopeQuery } from '@/lib/auth';
 import { fetchDividends, fetchDividendInfo, fetchMultipleQuotes } from '@/lib/stocks';
 import { fetchFxHistory, buildDenseRateMap, makeSharesResolver } from '@/lib/portfolio-history';
 
@@ -16,23 +16,23 @@ interface HoldingRow {
 // GET: 配息追蹤（預估年配息、殖利率、近 12 月配息、即將除息）
 export async function GET(request: Request) {
   try {
-    const role = await getUserRole();
-    if (!role) return NextResponse.json({ error: '未授權' }, { status: 401 });
+    const session = await getSession();
+    if (!session) return NextResponse.json({ error: '未授權' }, { status: 401 });
 
     const { searchParams } = new URL(request.url);
     const portfolioId = searchParams.get('portfolio_id');
 
-    const visibleIds = await getVisiblePortfolioIdsForRole(role);
+    const visibleIds = await getVisiblePortfolioIdsForRole(session);
     if (visibleIds !== null && portfolioId && !visibleIds.includes(portfolioId)) {
       return NextResponse.json({ error: '無權限檢視此投資組合' }, { status: 403 });
     }
 
     const supabase = createServerClient();
     // 含軟刪除 lot：歷史配息需還原除息當日持股
-    let query = supabase
-      .from('holdings')
-      .select('id, symbol, shares, cost_price, purchase_date, market')
-      .order('purchase_date', { ascending: true });
+    let query = scopeQuery(
+      supabase.from('holdings').select('id, symbol, shares, cost_price, purchase_date, market'),
+      session
+    ).order('purchase_date', { ascending: true });
     if (portfolioId) {
       query = query.eq('portfolio_id', portfolioId);
     } else if (visibleIds !== null) {
@@ -54,11 +54,14 @@ export async function GET(request: Request) {
     );
 
     const holdingIds = lots.map((h) => h.id);
-    const { data: sells } = await supabase
-      .from('transactions')
-      .select('holding_id, shares, transaction_date')
-      .in('holding_id', holdingIds)
-      .eq('type', 'sell');
+    const { data: sells } = await scopeQuery(
+      supabase
+        .from('transactions')
+        .select('holding_id, shares, transaction_date')
+        .in('holding_id', holdingIds)
+        .eq('type', 'sell'),
+      session
+    );
     const getSharesAtDate = makeSharesResolver(sells ?? []);
 
     // 各標的：市場、現行持股、成本（原幣）、lot 清單

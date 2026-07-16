@@ -97,8 +97,11 @@ export default function DashboardPage() {
   const [chartRefreshKey, setChartRefreshKey] = useState<number>(0);
 
   // 用戶角色狀態
-  const [userRole, setUserRole] = useState<"admin" | "guest" | null>(null);
+  const [userRole, setUserRole] = useState<"admin" | "guest" | "demo" | null>(null);
   const isAdmin = userRole === "admin";
+  const isDemo = userRole === "demo";
+  // demo 可自由編輯自己的沙盒；設定／AI 仍限 admin，故兩者不可混用同一個旗標
+  const canEdit = isAdmin || isDemo;
 
   // 載入持股資料
   const loadHoldings = useCallback(async () => {
@@ -481,6 +484,13 @@ export default function DashboardPage() {
 
   return (
     <div className="min-h-screen p-4 md:p-6 lg:p-8">
+      {isDemo && (
+        <div className="mb-4 rounded-lg border border-border bg-card px-4 py-2.5 text-sm text-muted">
+          <span className="font-medium text-foreground">Demo 模式</span>
+          ：這是你專屬的試玩沙盒，可自由新增與刪除，不影響任何真實資料；24 小時後自動重置。
+        </div>
+      )}
+
       {/* Header */}
       <header className="flex flex-wrap items-center justify-between gap-4 mb-6">
         <div className="flex flex-wrap items-center gap-2">
@@ -496,7 +506,7 @@ export default function DashboardPage() {
               setCurrentPortfolioId(portfolio.id);
               setCurrentPortfolioName(portfolio.name);
             }}
-            readOnly={!isAdmin}
+            readOnly={!canEdit}
           />
         </div>
         <div className="flex items-center gap-2">
@@ -597,7 +607,7 @@ export default function DashboardPage() {
               <div className="flex items-center justify-between text-muted">
                 <span className="flex items-center gap-1 font-medium">
                   現金
-                  {!isEditingCash && isAdmin && (
+                  {!isEditingCash && canEdit && (
                     <button
                       onClick={handleEditCash}
                       className="p-0.5 rounded hover:bg-border transition-colors"
@@ -769,7 +779,7 @@ export default function DashboardPage() {
       <div className="card">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold">持股清單</h2>
-          {isAdmin && (
+          {canEdit && (
             <button
               onClick={() => setShowForm(true)}
               className="btn-primary flex items-center gap-2"
@@ -789,8 +799,8 @@ export default function DashboardPage() {
             setShowForm(true);
           }}
           onDelete={handleDeleteClick}
-          onSell={isAdmin ? (h) => setSellTarget(h) : undefined}
-          readOnly={!isAdmin}
+          onSell={canEdit ? (h) => setSellTarget(h) : undefined}
+          readOnly={!canEdit}
         />
       </div>
 

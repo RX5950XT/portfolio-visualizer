@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase';
-import { getUserRole, getVisiblePortfolioIdsForRole } from '@/lib/auth';
+import { getSession, getVisiblePortfolioIdsForRole, scopeQuery } from '@/lib/auth';
 import { fetchMultipleQuotes, fetchExchangeRate } from '@/lib/stocks';
 import { fetchQuoteSummary } from '@/lib/yahoo-crumb';
 import { ETF_HOLDINGS_FALLBACK, STOCK_SECTOR_FALLBACK } from '@/lib/etf-holdings';
@@ -120,19 +120,22 @@ function addTo(map: Map<string, number>, key: string, amount: number) {
 // GET: 配置透視（ETF 穿透真實重倉 + 產業 + 地區）
 export async function GET(request: Request) {
   try {
-    const role = await getUserRole();
-    if (!role) return NextResponse.json({ error: '未授權' }, { status: 401 });
+    const session = await getSession();
+    if (!session) return NextResponse.json({ error: '未授權' }, { status: 401 });
 
     const { searchParams } = new URL(request.url);
     const portfolioId = searchParams.get('portfolio_id');
 
-    const visibleIds = await getVisiblePortfolioIdsForRole(role);
+    const visibleIds = await getVisiblePortfolioIdsForRole(session);
     if (visibleIds !== null && portfolioId && !visibleIds.includes(portfolioId)) {
       return NextResponse.json({ error: '無權限檢視此投資組合' }, { status: 403 });
     }
 
     const supabase = createServerClient();
-    let query = supabase.from('holdings').select('symbol, shares, market').gt('shares', 0);
+    let query = scopeQuery(
+      supabase.from('holdings').select('symbol, shares, market').gt('shares', 0),
+      session
+    );
     if (portfolioId) {
       query = query.eq('portfolio_id', portfolioId);
     } else if (visibleIds !== null) {

@@ -31,7 +31,8 @@ function InsightsContent() {
   const [lookthrough, setLookthrough] = useState<LookthroughData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [userRole, setUserRole] = useState<'admin' | 'guest' | null>(null);
+  const [userRole, setUserRole] = useState<'admin' | 'guest' | 'demo' | null>(null);
+  // AI 健診限 admin：demo 不得使用（避免陌生訪客耗用 OpenRouter 額度）
   const isAdmin = userRole === 'admin';
 
   const loadLookthrough = useCallback(async () => {

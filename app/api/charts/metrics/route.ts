@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase';
-import { getUserRole, getVisiblePortfolioIdsForRole } from '@/lib/auth';
+import { getSession, getVisiblePortfolioIdsForRole, scopeQuery } from '@/lib/auth';
 import { buildEquityCurve, type EquityLot } from '@/lib/equity-curve';
 import { buildDenseRateMap } from '@/lib/portfolio-history';
 import { fetchHistory } from '@/lib/stocks';
@@ -49,15 +49,15 @@ function buildBenchmarkValues(
 // GET: 計算進階績效指標（TWR / XIRR / 波動率 / Sharpe / 勝率）+ underwater 序列
 export async function GET(request: Request) {
   try {
-    const role = await getUserRole();
-    if (!role) {
+    const session = await getSession();
+    if (!session) {
       return NextResponse.json({ error: '未授權' }, { status: 401 });
     }
 
     const { searchParams } = new URL(request.url);
     const portfolioId = searchParams.get('portfolio_id');
 
-    const visibleIds = await getVisiblePortfolioIdsForRole(role);
+    const visibleIds = await getVisiblePortfolioIdsForRole(session);
     if (visibleIds !== null && portfolioId && !visibleIds.includes(portfolioId)) {
       return NextResponse.json({ error: '無權限檢視此投資組合' }, { status: 403 });
     }
@@ -65,10 +65,10 @@ export async function GET(request: Request) {
     const supabase = createServerClient();
 
     // 含軟刪除 lot（shares=0），用於重建歷史與還原原始投入
-    let holdingsQuery = supabase
-      .from('holdings')
-      .select('id, symbol, shares, cost_price, purchase_date, market')
-      .order('purchase_date', { ascending: true });
+    let holdingsQuery = scopeQuery(
+      supabase.from('holdings').select('id, symbol, shares, cost_price, purchase_date, market'),
+      session
+    ).order('purchase_date', { ascending: true });
 
     if (portfolioId) {
       holdingsQuery = holdingsQuery.eq('portfolio_id', portfolioId);
@@ -90,10 +90,13 @@ export async function GET(request: Request) {
     // - matchedSells：對應「現存 lot」，供權益曲線還原 + XIRR 賣出流入（與買入流出相配對）
     // - realizedSells：整個投組的已實現賣出（用 portfolio_id），供勝率——
     //   因為被硬刪除的 lot 其賣出仍是真實平倉紀錄，用 holding_id 篩會漏掉
-    let realizedQuery = supabase
-      .from('transactions')
-      .select('symbol, market, price, transaction_date, created_at, realized_pnl_twd')
-      .eq('type', 'sell');
+    let realizedQuery = scopeQuery(
+      supabase
+        .from('transactions')
+        .select('symbol, market, price, transaction_date, created_at, realized_pnl_twd')
+        .eq('type', 'sell'),
+      session
+    );
     if (portfolioId) {
       realizedQuery = realizedQuery.eq('portfolio_id', portfolioId);
     } else if (visibleIds !== null) {
@@ -101,11 +104,14 @@ export async function GET(request: Request) {
     }
 
     const [{ data: matched }, { data: realized }] = await Promise.all([
-      supabase
-        .from('transactions')
-        .select('holding_id, symbol, shares, price, transaction_date, market, realized_pnl_twd')
-        .in('holding_id', holdingIds)
-        .eq('type', 'sell'),
+      scopeQuery(
+        supabase
+          .from('transactions')
+          .select('holding_id, symbol, shares, price, transaction_date, market, realized_pnl_twd')
+          .in('holding_id', holdingIds)
+          .eq('type', 'sell'),
+        session
+      ),
       realizedQuery,
     ]);
 

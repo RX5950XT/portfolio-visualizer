@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase';
-import { getUserRole, getVisiblePortfolioIdsForRole } from '@/lib/auth';
+import { getSession, getVisiblePortfolioIdsForRole, scopeQuery } from '@/lib/auth';
 import { fetchHistory } from '@/lib/stocks';
 import { fetchFxHistory, buildDenseRateMap, makeSharesResolver } from '@/lib/portfolio-history';
 
@@ -21,8 +21,8 @@ interface DailyPnLPoint {
 // GET: 取得每日損益資料
 export async function GET(request: Request) {
   try {
-    const role = await getUserRole();
-    if (!role) {
+    const session = await getSession();
+    if (!session) {
       return NextResponse.json({ error: '未授權' }, { status: 401 });
     }
 
@@ -39,7 +39,7 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: '日期區間格式錯誤' }, { status: 400 });
     }
 
-    const visibleIds = await getVisiblePortfolioIdsForRole(role);
+    const visibleIds = await getVisiblePortfolioIdsForRole(session);
     if (visibleIds !== null && portfolioId && !visibleIds.includes(portfolioId)) {
       return NextResponse.json({ error: '無權限檢視此投資組合' }, { status: 403 });
     }
@@ -47,7 +47,7 @@ export async function GET(request: Request) {
     const supabase = createServerClient();
 
     // 不加 shares>0 過濾，需要含軟刪除的 lot 來重建歷史持股量
-    let query = supabase.from('holdings').select('*');
+    let query = scopeQuery(supabase.from('holdings').select('*'), session);
     if (portfolioId) {
       query = query.eq('portfolio_id', portfolioId);
     } else if (visibleIds !== null) {
@@ -92,11 +92,14 @@ export async function GET(request: Request) {
         })
       ),
       fetchFxHistory(startDateStr),
-      supabase
-        .from('transactions')
-        .select('holding_id, shares, transaction_date')
-        .in('holding_id', holdingIds)
-        .eq('type', 'sell'),
+      scopeQuery(
+        supabase
+          .from('transactions')
+          .select('holding_id, shares, transaction_date')
+          .in('holding_id', holdingIds)
+          .eq('type', 'sell'),
+        session
+      ),
     ]);
 
     // 合併同 symbol 的 priceMap（同標的多個 lot 共用同一份歷史）

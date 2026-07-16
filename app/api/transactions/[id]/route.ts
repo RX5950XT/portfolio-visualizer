@@ -1,24 +1,16 @@
 import { NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase';
-import { getUserRole } from '@/lib/auth';
+import { requireWriteSession, scopeQuery } from '@/lib/auth';
 
 interface RouteParams {
   params: Promise<{ id: string }>;
 }
 
-async function requireAdmin() {
-  const role = await getUserRole();
-  if (role !== 'admin') {
-    return NextResponse.json({ error: '無權限執行此操作' }, { status: 403 });
-  }
-  return null;
-}
-
 // PATCH: 僅允許更新備註（改 shares/price/pnl 會破壞會計，故不開放）
 export async function PATCH(request: Request, { params }: RouteParams) {
   try {
-    const forbidden = await requireAdmin();
-    if (forbidden) return forbidden;
+    const auth = await requireWriteSession();
+    if (!auth.ok) return auth.response;
 
     const { id } = await params;
     const body = await request.json();
@@ -32,10 +24,13 @@ export async function PATCH(request: Request, { params }: RouteParams) {
     }
 
     const supabase = createServerClient();
-    const { error } = await supabase
-      .from('transactions')
-      .update({ notes: notes || null })
-      .eq('id', id);
+    const { error } = await scopeQuery(
+      supabase
+        .from('transactions')
+        .update({ notes: notes || null })
+        .eq('id', id),
+      auth.session
+    );
 
     if (error) {
       console.error('更新交易備註失敗:', error);
@@ -51,16 +46,16 @@ export async function PATCH(request: Request, { params }: RouteParams) {
 // DELETE: 刪除交易紀錄
 export async function DELETE(_request: Request, { params }: RouteParams) {
   try {
-    const forbidden = await requireAdmin();
-    if (forbidden) return forbidden;
+    const auth = await requireWriteSession();
+    if (!auth.ok) return auth.response;
 
     const { id } = await params;
     const supabase = createServerClient();
 
-    const { error } = await supabase
-      .from('transactions')
-      .delete()
-      .eq('id', id);
+    const { error } = await scopeQuery(
+      supabase.from('transactions').delete().eq('id', id),
+      auth.session
+    );
 
     if (error) {
       console.error('刪除交易紀錄失敗:', error);

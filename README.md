@@ -32,7 +32,9 @@
 ### 🛡️ 安全與權限（RBAC）
 - **Admin（管理員）**：完整讀寫權限，可執行所有操作（含 AI 健診與設定）。
 - **Guest（訪客）**：唯讀模式，僅能看到管理員開放的投資組合。
-- **HMAC 簽章 Cookie**：認證 token 採 HMAC-SHA256 簽章，無法手動偽造。
+- **Demo（試玩沙盒）**：輸入 `DEMO_PASSWORD` 進入**每人專屬的獨立沙盒**，可自由增刪改體驗，
+  碰不到管理員與訪客的任何資料；預設種子為「一年前各投入 NT$50 萬買 VT 與 0050」，24 小時後自動重置。不提供 AI 健診與設定。
+- **HMAC 簽章 Cookie**：認證 token 採 HMAC-SHA256 簽章，無法手動偽造（demo 的沙盒 id 亦納入簽章）。
 - **訪客可見性控制**：每個投資組合可獨立設定是否對訪客開放。
 
 ---
@@ -80,6 +82,10 @@ SITE_PASSWORD=your_admin_password
 # 訪客密碼（可選；不設定則不開放訪客模式）
 GUEST_PASSWORD=your_guest_password
 
+# Demo 沙盒密碼（可選；不設定則不開放 demo 空間）
+# 此密碼供公開分享試玩，輸入後進入獨立沙盒，碰不到真實資料
+DEMO_PASSWORD=demo
+
 # ── Supabase ───────────────────────────────────────────────────────
 NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
@@ -101,6 +107,7 @@ SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 5. migrations/20260513_supabase_data_api_remediation.sql  # 啟用 RLS、補 service_role GRANT、補建缺漏表
 6. migrations/20260525_app_settings.sql             # AI 顧問設定表（含 OpenRouter Key，僅 service_role）
 7. migrations/20260525_revoke_anon_data_access.sql  # 安全修補：撤銷 anon/authenticated 的 Data API 權限
+8. migrations/20260716_demo_space.sql               # Demo 沙盒：4 表加 demo_space 欄位 + partial index
 ```
 
 > 已連結 Supabase CLI 者可改用 `npx supabase db push`（`supabase/migrations/` 內含對應的 app_settings 與 anon 撤銷 migration）。
@@ -152,7 +159,8 @@ portfolio-app/
 │   └── ui/                 # shadcn/ui 共用元件
 ├── lib/
 │   ├── auth-token.ts       # Edge-safe HMAC token（middleware 用）
-│   ├── auth.ts             # Cookie 管理 + 訪客可見性過濾
+│   ├── auth.ts             # Cookie 管理 + 訪客可見性過濾 + demo 沙盒隔離（scopeQuery / stampSpace）
+│   ├── demo-seed.ts        # Demo 沙盒種子（VT/0050）與過期清理
 │   ├── supabase.ts         # Supabase Client 初始化（anon / service_role）
 │   ├── ai-config.ts        # OpenRouter 設定讀寫 + 金鑰遮罩
 │   ├── stocks.ts           # 股價 / 匯率 / 配息 API 封裝
@@ -172,11 +180,12 @@ portfolio-app/
 
 ## 🔐 安全說明
 
-- **Cookie 防偽造**：Cookie 值為 `<role>.<exp>.<HMAC-SHA256-sig>`，偽造需要 `AUTH_SECRET`。
+- **Cookie 防偽造**：Cookie 值為 `<role>.<exp>.<HMAC-SHA256-sig>`（demo 為 `demo.<space>.<exp>.<sig>`），偽造需要 `AUTH_SECRET`；demo 的沙盒 id 納入簽章，無法竄改成他人沙盒。
 - **資料庫存取收斂**：所有資料表**僅** GRANT 給 `service_role`，**不開放** `anon`/`authenticated`；app 一律經伺服器端 service_role 存取。如此即使公開的 anon key 外流，未登入者打 Data API 也只會得到 `401`，無法繞過密碼直讀資料。
 - **RLS 預設拒絕**：資料表啟用 RLS 但不建立寬鬆 policy（禁用 `USING(true)`）；service_role 不受 RLS 限制，app 正常運作。
 - **OpenRouter Key 保護**：金鑰存於 `app_settings`（僅 service_role），僅伺服器端使用；API 回前端一律遮罩（`sk-or-…abcd`），永不回傳明文。
 - **訪客隔離**：API 層強制過濾，訪客只能讀取 `visible_to_guest = true` 的組合。
+- **Demo 沙盒隔離**：4 張資料表帶 `demo_space`（真實資料為 NULL）。所有查詢經 `scopeQuery` 統一套述詞——admin/guest 查 `demo_space IS NULL`、demo 查 `= 自己的 space`。因此 demo 就算帶著真實資料的 row id 打寫入端點，也只會匹配 0 筆而無效（安全 by construction）。
 - **密碼比對**：使用定時間比對（timing-safe）避免時序攻擊。
 - **失敗延遲**：登入失敗固定延遲 400ms 阻擋快速暴力破解（正式環境建議於 Vercel 邊界再加 rate limit）。
 

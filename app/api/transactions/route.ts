@@ -1,6 +1,12 @@
 import { NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase';
-import { getUserRole, getVisiblePortfolioIdsForRole } from '@/lib/auth';
+import {
+  getSession,
+  getVisiblePortfolioIdsForRole,
+  requireWriteSession,
+  scopeQuery,
+  stampSpace,
+} from '@/lib/auth';
 import { fetchExchangeRate } from '@/lib/stocks';
 import { fetchFxHistory, buildDenseRateMap } from '@/lib/portfolio-history';
 
@@ -26,38 +32,28 @@ interface SellTxRow {
   holding_id: string;
   portfolio_id: string | null;
   notes: string | null;
-}
-
-// 權限檢查輔助函式
-async function requireAdmin() {
-  const role = await getUserRole();
-  if (role !== 'admin') {
-    return NextResponse.json({ error: '無權限執行此操作' }, { status: 403 });
-  }
-  return null;
+  demo_space?: string;
 }
 
 // GET: 取得交易歷史
 export async function GET(request: Request) {
   try {
-    const role = await getUserRole();
-    if (!role) {
+    const session = await getSession();
+    if (!session) {
       return NextResponse.json({ error: '未授權' }, { status: 401 });
     }
 
     const { searchParams } = new URL(request.url);
     const portfolioId = searchParams.get('portfolio_id');
 
-    const visibleIds = await getVisiblePortfolioIdsForRole(role);
+    const visibleIds = await getVisiblePortfolioIdsForRole(session);
     if (visibleIds !== null && portfolioId && !visibleIds.includes(portfolioId)) {
       return NextResponse.json({ error: '無權限檢視此投資組合' }, { status: 403 });
     }
 
     const supabase = createServerClient();
 
-    let query = supabase
-      .from('transactions')
-      .select('*')
+    let query = scopeQuery(supabase.from('transactions').select('*'), session)
       .order('transaction_date', { ascending: false })
       .order('created_at', { ascending: false });
 
@@ -90,8 +86,9 @@ export async function GET(request: Request) {
 // 且每個被扣批次各寫一筆 sell tx（holding_id 對應 lot），歷史圖表重建邏輯無須改動。
 export async function POST(request: Request) {
   try {
-    const forbidden = await requireAdmin();
-    if (forbidden) return forbidden;
+    const auth = await requireWriteSession();
+    if (!auth.ok) return auth.response;
+    const { session } = auth;
 
     const body = await request.json();
     const { lot_ids, shares: sellShares, price: sellPrice, transaction_date, notes } = body;
@@ -112,11 +109,11 @@ export async function POST(request: Request) {
 
     const supabase = createServerClient();
 
-    const { data: lotsData, error: lotsError } = await supabase
-      .from('holdings')
-      .select('*')
-      .in('id', lot_ids)
-      .gt('shares', 0);
+    // 跨沙盒的 lot_ids 會匹配 0 筆 → 下方 lots.length === 0 → 404
+    const { data: lotsData, error: lotsError } = await scopeQuery(
+      supabase.from('holdings').select('*').in('id', lot_ids).gt('shares', 0),
+      session
+    );
 
     if (lotsError) {
       console.error('取得持股失敗:', lotsError);
@@ -172,7 +169,10 @@ export async function POST(request: Request) {
       sellDayFx = dense.get(transaction_date) ?? (await fetchExchangeRate()) ?? 32;
       getFxAtPurchase = (date: string) => dense.get(date) ?? sellDayFx;
     }
-    const portfolioId = body.portfolio_id || lots[0].portfolio_id || null;
+    // demo 忽略 body.portfolio_id：避免把任意（甚至真實）組合 id 寫進自己沙盒的 tx row
+    const portfolioId = session.demoSpace
+      ? lots[0].portfolio_id
+      : body.portfolio_id || lots[0].portfolio_id || null;
     const ratio = sellSharesNum / totalShares;
 
     // pro-rata 累積分配：用「應累積賣出 − 已實際扣減」算每批次扣減量，
@@ -212,6 +212,7 @@ export async function POST(request: Request) {
         holding_id: lot.id,
         portfolio_id: portfolioId,
         notes: notes || null,
+        ...stampSpace(session),
       });
       lotUpdates.push({ id: lot.id, shares: remaining <= EPS ? 0 : remaining });
     }
@@ -226,10 +227,10 @@ export async function POST(request: Request) {
     // 更新各批次股數（全扣 → shares=0 軟刪除，保留 row 供歷史圖表重建）
     const now = new Date().toISOString();
     for (const u of lotUpdates) {
-      const { error: updateError } = await supabase
-        .from('holdings')
-        .update({ shares: u.shares, updated_at: now })
-        .eq('id', u.id);
+      const { error: updateError } = await scopeQuery(
+        supabase.from('holdings').update({ shares: u.shares, updated_at: now }).eq('id', u.id),
+        session
+      );
       if (updateError) {
         console.error('更新持股失敗:', updateError);
         return NextResponse.json({ error: '更新持股失敗' }, { status: 500 });
@@ -238,19 +239,25 @@ export async function POST(request: Request) {
 
     // 更新現金餘額（加回整體賣出金額）：用賣出當日 FX，與 realizedPnl 換算口徑一致
     const sellAmountTWD = sellPriceNum * sellSharesNum * sellDayFx;
-    let cashQuery = supabase.from('cash_balance').select('*');
+    let cashQuery = scopeQuery(supabase.from('cash_balance').select('*'), session);
     if (portfolioId) {
       cashQuery = cashQuery.eq('portfolio_id', portfolioId);
     }
     const { data: cashData } = await cashQuery.single();
 
     if (cashData) {
-      await supabase
-        .from('cash_balance')
-        .update({ amount_twd: Number(cashData.amount_twd) + sellAmountTWD, updated_at: now })
-        .eq('id', cashData.id);
+      await scopeQuery(
+        supabase
+          .from('cash_balance')
+          .update({ amount_twd: Number(cashData.amount_twd) + sellAmountTWD, updated_at: now })
+          .eq('id', cashData.id),
+        session
+      );
     } else {
-      const insertData: { amount_twd: number; portfolio_id?: string } = { amount_twd: sellAmountTWD };
+      const insertData: { amount_twd: number; portfolio_id?: string; demo_space?: string } = {
+        amount_twd: sellAmountTWD,
+        ...stampSpace(session),
+      };
       if (portfolioId) insertData.portfolio_id = portfolioId;
       await supabase.from('cash_balance').insert(insertData);
     }

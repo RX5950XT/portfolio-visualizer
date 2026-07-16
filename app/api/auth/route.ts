@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
+import { randomUUID } from 'node:crypto';
 import { verifyPassword, setAuthCookie, clearAuthCookie } from '@/lib/auth';
+import { seedDemoSpace, sweepExpiredDemo } from '@/lib/demo-seed';
 
 // Why: Serverless 環境無法共享狀態，這裡加固定延遲讓每次嘗試至少耗費數百毫秒，
 //      即可阻擋 HTTP 層次的快速暴力破解。真正的 rate limit 建議靠前端（Vercel）邊界。
@@ -25,6 +27,15 @@ export async function POST(request: Request) {
     if (!role) {
       await sleep(FAILED_LOGIN_DELAY_MS);
       return NextResponse.json({ error: '密碼錯誤' }, { status: 401 });
+    }
+
+    // demo：每次登入配一個全新沙盒，並順手清掉過期的舊沙盒
+    if (role === 'demo') {
+      await sweepExpiredDemo();
+      const demoSpace = randomUUID();
+      await seedDemoSpace(demoSpace);
+      await setAuthCookie(role, demoSpace);
+      return NextResponse.json({ data: { success: true, role } });
     }
 
     await setAuthCookie(role);

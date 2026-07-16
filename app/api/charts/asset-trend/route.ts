@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase';
-import { getUserRole, getVisiblePortfolioIdsForRole } from '@/lib/auth';
+import { getSession, getVisiblePortfolioIdsForRole, scopeQuery } from '@/lib/auth';
 import { fetchHistory } from '@/lib/stocks';
 import { fetchFxHistory, buildDenseRateMap, makeSharesResolver } from '@/lib/portfolio-history';
 
@@ -23,15 +23,15 @@ interface ChartDataPoint {
 // GET: 取得資產走勢資料（市值線 + 成本線）
 export async function GET(request: Request) {
   try {
-    const role = await getUserRole();
-    if (!role) {
+    const session = await getSession();
+    if (!session) {
       return NextResponse.json({ error: '未授權' }, { status: 401 });
     }
 
     const { searchParams } = new URL(request.url);
     const portfolioId = searchParams.get('portfolio_id');
 
-    const visibleIds = await getVisiblePortfolioIdsForRole(role);
+    const visibleIds = await getVisiblePortfolioIdsForRole(session);
     if (visibleIds !== null && portfolioId && !visibleIds.includes(portfolioId)) {
       return NextResponse.json({ error: '無權限檢視此投資組合' }, { status: 403 });
     }
@@ -39,10 +39,10 @@ export async function GET(request: Request) {
     const supabase = createServerClient();
 
     // 不加 shares>0 過濾，需要含軟刪除的 lot 來重建歷史持股量
-    let holdingsQuery = supabase
-      .from('holdings')
-      .select('*')
-      .order('purchase_date', { ascending: true });
+    let holdingsQuery = scopeQuery(supabase.from('holdings').select('*'), session).order(
+      'purchase_date',
+      { ascending: true }
+    );
 
     if (portfolioId) {
       holdingsQuery = holdingsQuery.eq('portfolio_id', portfolioId);
@@ -77,11 +77,14 @@ export async function GET(request: Request) {
       ),
       fetchFxHistory(earliestDate),
       fetchHistory('^GSPC', { startDate: earliestDate }),
-      supabase
-        .from('transactions')
-        .select('holding_id, shares, transaction_date')
-        .in('holding_id', holdingIds)
-        .eq('type', 'sell'),
+      scopeQuery(
+        supabase
+          .from('transactions')
+          .select('holding_id, shares, transaction_date')
+          .in('holding_id', holdingIds)
+          .eq('type', 'sell'),
+        session
+      ),
     ]);
 
     const spSparse = new Map<string, number>();

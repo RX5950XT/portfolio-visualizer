@@ -1,29 +1,23 @@
 import { NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase';
-import { getUserRole } from '@/lib/auth';
-
-// 權限檢查輔助函式
-async function requireAdmin() {
-  const role = await getUserRole();
-  if (role !== 'admin') {
-    return NextResponse.json({ error: '無權限執行此操作' }, { status: 403 });
-  }
-  return null;
-}
+import { getSession, requireWriteSession, scopeQuery, stampSpace } from '@/lib/auth';
 
 // GET: 取得所有投資組合
 export async function GET() {
   try {
     const supabase = createServerClient();
-    const role = await getUserRole();
+    const session = await getSession();
+    if (!session) {
+      return NextResponse.json({ error: '未授權' }, { status: 401 });
+    }
 
-    let query = supabase
-      .from('portfolios')
-      .select('*')
-      .order('created_at', { ascending: true });
+    let query = scopeQuery(
+      supabase.from('portfolios').select('*'),
+      session
+    ).order('created_at', { ascending: true });
 
     // 訪客只能看到管理員開放的組合
-    if (role === 'guest') {
+    if (session.role === 'guest') {
       query = query.eq('visible_to_guest', true);
     }
 
@@ -57,9 +51,9 @@ export async function GET() {
 // POST: 建立新投資組合
 export async function POST(request: Request) {
   try {
-    // 權限檢查：只有管理員可以建立投資組合
-    const forbidden = await requireAdmin();
-    if (forbidden) return forbidden;
+    // 權限檢查：admin 建真實組合、demo 建在自己沙盒
+    const auth = await requireWriteSession();
+    if (!auth.ok) return auth.response;
 
     const body = await request.json();
     const { name } = body;
@@ -72,7 +66,7 @@ export async function POST(request: Request) {
 
     const { data, error } = await supabase
       .from('portfolios')
-      .insert({ name: name.trim() })
+      .insert({ name: name.trim(), ...stampSpace(auth.session) })
       .select()
       .single();
 

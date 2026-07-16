@@ -1,22 +1,19 @@
 import { NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase';
-import { getUserRole, getVisiblePortfolioIdsForRole } from '@/lib/auth';
+import {
+  getSession,
+  getVisiblePortfolioIdsForRole,
+  requireWriteSession,
+  scopeQuery,
+  stampSpace,
+} from '@/lib/auth';
 import type { Holding } from '@/types';
-
-// 權限檢查輔助函式
-async function requireAdmin() {
-  const role = await getUserRole();
-  if (role !== 'admin') {
-    return NextResponse.json({ error: '無權限執行此操作' }, { status: 403 });
-  }
-  return null;
-}
 
 // GET: 取得指定投資組合的持股
 export async function GET(request: Request) {
   try {
-    const role = await getUserRole();
-    if (!role) {
+    const session = await getSession();
+    if (!session) {
       return NextResponse.json({ error: '未授權' }, { status: 401 });
     }
 
@@ -24,18 +21,17 @@ export async function GET(request: Request) {
     const portfolioId = searchParams.get('portfolio_id');
 
     // Why: 訪客只能讀取 visible_to_guest=true 的組合，否則可用 portfolio_id 直接撈出隱藏資料
-    const visibleIds = await getVisiblePortfolioIdsForRole(role);
+    const visibleIds = await getVisiblePortfolioIdsForRole(session);
     if (visibleIds !== null && portfolioId && !visibleIds.includes(portfolioId)) {
       return NextResponse.json({ error: '無權限檢視此投資組合' }, { status: 403 });
     }
 
     const supabase = createServerClient();
 
-    let query = supabase
-      .from('holdings')
-      .select('*')
-      .gt('shares', 0)
-      .order('created_at', { ascending: false });
+    let query = scopeQuery(
+      supabase.from('holdings').select('*').gt('shares', 0),
+      session
+    ).order('created_at', { ascending: false });
 
     if (portfolioId) {
       query = query.eq('portfolio_id', portfolioId);
@@ -63,9 +59,8 @@ export async function GET(request: Request) {
 // POST: 新增持股
 export async function POST(request: Request) {
   try {
-    // 權限檢查：只有管理員可以新增持股
-    const forbidden = await requireAdmin();
-    if (forbidden) return forbidden;
+    const auth = await requireWriteSession();
+    if (!auth.ok) return auth.response;
 
     const body = await request.json();
     const { symbol, shares, cost_price, purchase_date, portfolio_id } = body;
@@ -88,12 +83,14 @@ export async function POST(request: Request) {
       purchase_date: string;
       market: string;
       portfolio_id?: string;
+      demo_space?: string;
     } = {
       symbol: upperSymbol,
       shares: parseFloat(shares),
       cost_price: parseFloat(cost_price),
       purchase_date,
       market,
+      ...stampSpace(auth.session),
     };
 
     // 如果有指定投資組合，加入 portfolio_id

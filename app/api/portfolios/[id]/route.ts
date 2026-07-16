@@ -1,42 +1,38 @@
 import { NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase';
-import { getUserRole, getVisiblePortfolioIdsForRole } from '@/lib/auth';
+import {
+  getSession,
+  getVisiblePortfolioIdsForRole,
+  requireWriteSession,
+  scopeQuery,
+} from '@/lib/auth';
 
 interface RouteParams {
   params: Promise<{ id: string }>;
 }
 
-// 權限檢查輔助函式
-async function requireAdmin() {
-  const role = await getUserRole();
-  if (role !== 'admin') {
-    return NextResponse.json({ error: '無權限執行此操作' }, { status: 403 });
-  }
-  return null;
-}
-
 // GET: 取得單一投資組合
 export async function GET(request: Request, { params }: RouteParams) {
   try {
-    const role = await getUserRole();
-    if (!role) {
+    const session = await getSession();
+    if (!session) {
       return NextResponse.json({ error: '未授權' }, { status: 401 });
     }
 
     const { id } = await params;
 
-    const visibleIds = await getVisiblePortfolioIdsForRole(role);
+    const visibleIds = await getVisiblePortfolioIdsForRole(session);
     if (visibleIds !== null && !visibleIds.includes(id)) {
       return NextResponse.json({ error: '無權限檢視此投資組合' }, { status: 403 });
     }
 
     const supabase = createServerClient();
 
-    const { data, error } = await supabase
-      .from('portfolios')
-      .select('*')
-      .eq('id', id)
-      .single();
+    // 跨沙盒的 id 會匹配 0 筆 → single() 報錯 → 404
+    const { data, error } = await scopeQuery(
+      supabase.from('portfolios').select('*').eq('id', id),
+      session
+    ).single();
 
     if (error) {
       console.error('取得投資組合失敗:', error);
@@ -53,9 +49,8 @@ export async function GET(request: Request, { params }: RouteParams) {
 // PUT: 更新投資組合（重命名 / 切換訪客可見性）
 export async function PUT(request: Request, { params }: RouteParams) {
   try {
-    // 權限檢查：只有管理員可以更新投資組合
-    const forbidden = await requireAdmin();
-    if (forbidden) return forbidden;
+    const auth = await requireWriteSession();
+    if (!auth.ok) return auth.response;
 
     const { id } = await params;
     const body = await request.json();
@@ -76,10 +71,10 @@ export async function PUT(request: Request, { params }: RouteParams) {
 
     const supabase = createServerClient();
 
-    const { data, error } = await supabase
-      .from('portfolios')
-      .update(updateData)
-      .eq('id', id)
+    const { data, error } = await scopeQuery(
+      supabase.from('portfolios').update(updateData).eq('id', id),
+      auth.session
+    )
       .select()
       .single();
 
@@ -98,24 +93,24 @@ export async function PUT(request: Request, { params }: RouteParams) {
 // DELETE: 刪除投資組合（同時刪除該組合下的所有持股和現金）
 export async function DELETE(request: Request, { params }: RouteParams) {
   try {
-    // 權限檢查：只有管理員可以刪除投資組合
-    const forbidden = await requireAdmin();
-    if (forbidden) return forbidden;
+    const auth = await requireWriteSession();
+    if (!auth.ok) return auth.response;
 
     const { id } = await params;
     const supabase = createServerClient();
 
-    // 先刪除該組合下的所有持股
-    await supabase.from('holdings').delete().eq('portfolio_id', id);
+    // 三個 delete 都必須套 scopeQuery：只擋最後一個的話，
+    // demo 傳真實組合 id 仍會刪掉 admin 的持股與現金。
+    await scopeQuery(supabase.from('holdings').delete().eq('portfolio_id', id), auth.session);
+    await scopeQuery(
+      supabase.from('cash_balance').delete().eq('portfolio_id', id),
+      auth.session
+    );
 
-    // 刪除該組合的現金餘額
-    await supabase.from('cash_balance').delete().eq('portfolio_id', id);
-
-    // 刪除投資組合本身
-    const { error } = await supabase
-      .from('portfolios')
-      .delete()
-      .eq('id', id);
+    const { error } = await scopeQuery(
+      supabase.from('portfolios').delete().eq('id', id),
+      auth.session
+    );
 
     if (error) {
       console.error('刪除投資組合失敗:', error);

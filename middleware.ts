@@ -18,9 +18,9 @@ export async function middleware(request: NextRequest) {
 
   // 驗證 HMAC 簽章 token（舊版純文字 cookie 會驗證失敗 → 強制重登）
   const token = request.cookies.get(AUTH_COOKIE_NAME)?.value;
-  const role = await verifyAuthToken(token);
+  const session = await verifyAuthToken(token);
 
-  if (!role) {
+  if (!session) {
     if (pathname.startsWith('/api/')) {
       return NextResponse.json({ error: '未授權' }, { status: 401 });
     }
