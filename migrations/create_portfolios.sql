@@ -7,6 +7,11 @@ CREATE TABLE IF NOT EXISTS portfolios (
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+-- 建表即上鎖：啟用 RLS 並撤銷 anon/authenticated，讓本檔自包含、不依賴後續 remediation migration。
+-- Why: Supabase default privileges 會替新表自動 GRANT 給 anon，若安裝順序在補鎖前有空窗即可被公開 anon key 讀寫。
+ALTER TABLE portfolios ENABLE ROW LEVEL SECURITY;
+REVOKE ALL PRIVILEGES ON public.portfolios FROM anon, authenticated;
+
 -- 新增 portfolio_id 欄位到 holdings 表格
 ALTER TABLE holdings
 ADD COLUMN IF NOT EXISTS portfolio_id UUID REFERENCES portfolios(id) ON DELETE CASCADE;

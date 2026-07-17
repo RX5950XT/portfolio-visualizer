@@ -93,8 +93,16 @@ export async function POST(request: Request) {
       ...stampSpace(auth.session),
     };
 
-    // 如果有指定投資組合，加入 portfolio_id
+    // 有指定組合時，驗證該組合屬於當前 session 的範圍：
+    // demo 帶真實組合 id、或任意非法/他人 id 都會匹配 0 筆而被擋，避免跨 space 參照污染
     if (portfolio_id) {
+      const { data: owned } = await scopeQuery(
+        supabase.from('portfolios').select('id').eq('id', portfolio_id),
+        auth.session
+      ).maybeSingle();
+      if (!owned) {
+        return NextResponse.json({ error: '無效的投資組合' }, { status: 400 });
+      }
       insertData.portfolio_id = portfolio_id;
     }
 

@@ -10,7 +10,19 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: '請提供股票代號' }, { status: 400 });
   }
 
-  const symbolList = symbols.split(',').map((s) => s.trim().toUpperCase());
+  const symbolList = symbols
+    .split(',')
+    .map((s) => s.trim().toUpperCase())
+    .filter(Boolean);
+
+  if (symbolList.length === 0) {
+    return NextResponse.json({ error: '請提供股票代號' }, { status: 400 });
+  }
+
+  // 上限防護：每個 symbol 都會對 Yahoo 發一次 fetch，無上限則單一請求可放大成大量對外請求
+  if (symbolList.length > 50) {
+    return NextResponse.json({ error: '一次最多查詢 50 檔' }, { status: 400 });
+  }
 
   if (symbolList.length === 1) {
     const quote = await fetchQuote(symbolList[0]);

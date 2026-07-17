@@ -3,6 +3,7 @@ import { cookies } from 'next/headers';
 import { createServerClient } from '@/lib/supabase';
 import {
   DEMO_PASSWORD,
+  MIN_PASSWORD_LENGTH,
   getAuthConfig,
   verifyPasswordHash,
 } from '@/lib/auth-config';
@@ -34,6 +35,11 @@ export async function verifyPassword(
     if (!adminPassword) {
       console.warn(
         'SITE_PASSWORD 環境變數未設定，且資料庫尚未設定管理員密碼'
+      );
+    } else if (adminPassword.length < MIN_PASSWORD_LENGTH) {
+      // 引導密碼過短即拒用，避免弱密碼長期把守 admin 入口
+      console.warn(
+        `SITE_PASSWORD 長度不足 ${MIN_PASSWORD_LENGTH} 字元，已忽略；請於 /settings 設定更強的密碼`
       );
     } else if (timingSafeEqual(password, adminPassword)) {
       return 'admin';

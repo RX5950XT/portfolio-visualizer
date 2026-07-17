@@ -71,6 +71,17 @@ export async function PUT(request: Request) {
 
     const supabase = createServerClient();
 
+    // 有指定組合時，驗證歸屬（demo 帶真實/他人組合 id 會匹配 0 筆而被擋，避免跨 space 參照污染）
+    if (portfolio_id) {
+      const { data: owned } = await scopeQuery(
+        supabase.from('portfolios').select('id').eq('id', portfolio_id),
+        session
+      ).maybeSingle();
+      if (!owned) {
+        return NextResponse.json({ error: '無效的投資組合' }, { status: 400 });
+      }
+    }
+
     // 先嘗試查詢現有記錄
     let query = scopeQuery(supabase.from('cash_balance').select('id'), session);
     if (portfolio_id) {
