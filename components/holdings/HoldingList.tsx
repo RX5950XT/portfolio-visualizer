@@ -45,6 +45,17 @@ export default function HoldingList({ holdings, exchangeRate, totalValue, onEdit
     return `${value < 0 ? '-' : ''}${prefix}${formatted}`;
   };
 
+  // 價格欄專用：均價、現價一律 2 位小數（台股報價原生含小數，整數化會丟精度）
+  const formatPrice = (value: number, currency = 'TWD'): string => {
+    if (value === null || value === undefined || isNaN(value)) return '—';
+    const prefix = currency === 'USD' ? '$' : 'NT$';
+    const formatted = Math.abs(value).toLocaleString('zh-TW', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+    return `${value < 0 ? '-' : ''}${prefix}${formatted}`;
+  };
+
   const formatDate = (dateStr: string): string => {
     if (!dateStr) return '—';
     const date = new Date(dateStr);
@@ -135,14 +146,14 @@ export default function HoldingList({ holdings, exchangeRate, totalValue, onEdit
                   </td>
                   <td className="py-3 text-right">{Number(holding.shares).toLocaleString()}</td>
                   <td className="py-3 text-right">
-                    {formatCurrency(Number(holding.cost_price), currency)}
+                    {formatPrice(Number(holding.cost_price), currency)}
                   </td>
                   <td className="py-3 text-right">
                     {formatCurrency(totalCost, currency)}
                   </td>
                   <td className="py-3 text-right">
                     {hasPrice
-                      ? formatCurrency(holding.currentPrice!, currency)
+                      ? formatPrice(holding.currentPrice!, currency)
                       : <span className="text-muted">載入中...</span>
                     }
                   </td>
@@ -214,7 +225,7 @@ export default function HoldingList({ holdings, exchangeRate, totalValue, onEdit
                       </td>
                       <td className="py-2 text-right text-muted">{Number(lot.shares).toLocaleString()}</td>
                       <td className="py-2 text-right text-muted">
-                        {formatCurrency(Number(lot.cost_price), lotCurrency)}
+                        {formatPrice(Number(lot.cost_price), lotCurrency)}
                       </td>
                       <td className="py-2 text-right text-muted">
                         {formatCurrency(lotTotalCost, lotCurrency)}
@@ -300,7 +311,7 @@ export default function HoldingList({ holdings, exchangeRate, totalValue, onEdit
                     )}
                   </div>
                   <p className="text-sm text-muted mt-0.5">
-                    {Number(holding.shares).toLocaleString()} 股 @ {formatCurrency(Number(holding.cost_price), currency)}
+                    {Number(holding.shares).toLocaleString()} 股 @ {formatPrice(Number(holding.cost_price), currency)}
                   </p>
                   <p className="text-xs text-muted">
                     總成本: {formatCurrency(totalCost, currency)}
@@ -335,7 +346,7 @@ export default function HoldingList({ holdings, exchangeRate, totalValue, onEdit
                       <div key={lot.id} className="flex items-center justify-between text-sm pl-2 border-l-2 border-border">
                         <div>
                           <p className="text-muted">
-                            {formatDate(lot.purchase_date)} · {Number(lot.shares).toLocaleString()} 股 @ {formatCurrency(Number(lot.cost_price), lotCurrency)}
+                            {formatDate(lot.purchase_date)} · {Number(lot.shares).toLocaleString()} 股 @ {formatPrice(Number(lot.cost_price), lotCurrency)}
                           </p>
                         </div>
                         <div className="flex items-center gap-2">
@@ -376,7 +387,7 @@ export default function HoldingList({ holdings, exchangeRate, totalValue, onEdit
               {!hasMultipleLots && (
                 <div className="flex items-center justify-between pt-2 border-t border-border">
                   <div className="flex items-center gap-2 text-xs text-muted">
-                    {hasPrice && <span>現價: {formatCurrency(holding.currentPrice!, currency)}</span>}
+                    {hasPrice && <span>現價: {formatPrice(holding.currentPrice!, currency)}</span>}
                     {holding.expenseRatio !== null && holding.expenseRatio !== undefined && (
                       <span>費用率: {(holding.expenseRatio * 100).toFixed(3)}%</span>
                     )}

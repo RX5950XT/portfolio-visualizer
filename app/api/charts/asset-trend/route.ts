@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase';
 import { getSession, getVisiblePortfolioIdsForRole, scopeQuery } from '@/lib/auth';
-import { fetchHistory } from '@/lib/stocks';
+import { fetchHistory, fetchMultipleQuotes, fetchExchangeRate } from '@/lib/stocks';
 import { fetchFxHistory, buildDenseRateMap, makeSharesResolver } from '@/lib/portfolio-history';
 
 interface Holding {
@@ -64,28 +64,33 @@ export async function GET(request: Request) {
     );
 
     const holdingIds = holdings.map((h: Holding) => h.id);
+    const uniqueSymbols = [...new Set((holdings as Holding[]).map((h) => h.symbol))];
 
-    // 並行取得：各標的歷史股價 + 歷史匯率 + S&P 500 對照價格 + 賣出交易（用於重建歷史持股量）
-    const [historyResults, fxSparse, spHistory, sellsResult] = await Promise.all([
-      Promise.all(
-        holdings.map(async (h: Holding) => {
-          const history = await fetchHistory(h.symbol, { startDate: earliestDate });
-          const priceMap = new Map<string, number>();
-          history.forEach((p) => priceMap.set(p.date, p.close));
-          return { symbol: h.symbol, priceMap };
-        })
-      ),
-      fetchFxHistory(earliestDate),
-      fetchHistory('^GSPC', { startDate: earliestDate }),
-      scopeQuery(
-        supabase
-          .from('transactions')
-          .select('holding_id, shares, transaction_date')
-          .in('holding_id', holdingIds)
-          .eq('type', 'sell'),
-        session
-      ),
-    ]);
+    // 並行取得：各標的歷史股價 + 歷史匯率 + S&P 500 對照價格 + 賣出交易（重建歷史持股量）
+    // + 即時報價與即時匯率：僅用來覆蓋「今天」這一格，與 dashboard 卡片同源
+    const [historyResults, fxSparse, spHistory, sellsResult, liveQuotes, liveRate] =
+      await Promise.all([
+        Promise.all(
+          holdings.map(async (h: Holding) => {
+            const history = await fetchHistory(h.symbol, { startDate: earliestDate });
+            const priceMap = new Map<string, number>();
+            history.forEach((p) => priceMap.set(p.date, p.close));
+            return { symbol: h.symbol, priceMap };
+          })
+        ),
+        fetchFxHistory(earliestDate),
+        fetchHistory('^GSPC', { startDate: earliestDate }),
+        scopeQuery(
+          supabase
+            .from('transactions')
+            .select('holding_id, shares, transaction_date')
+            .in('holding_id', holdingIds)
+            .eq('type', 'sell'),
+          session
+        ),
+        fetchMultipleQuotes([...uniqueSymbols, '^GSPC']),
+        fetchExchangeRate(),
+      ]);
 
     const spSparse = new Map<string, number>();
     for (const p of spHistory) spSparse.set(p.date, p.close);
@@ -114,6 +119,21 @@ export async function GET(request: Request) {
     // 每日匯率與 S&P 500 價格（逐日，forward/back-fill 補非交易日）
     const denseRateMap = buildDenseRateMap(fxSparse, dateList);
     const spDense = buildDenseRateMap(spSparse, dateList);
+
+    // 「今天」用即時報價/匯率覆蓋歷史 forward-fill：歷史 API 當日收盤常缺值（尤其台股），
+    // 會讓末點沿用昨價、與卡片即時值對不上。抓不到報價時自動退回 forward-fill。
+    const today = dateList[dateList.length - 1];
+    for (const [symbol, q] of liveQuotes) {
+      const price = q.regularMarketPrice;
+      if (!price || price <= 0) continue;
+      if (symbol === '^GSPC') {
+        spDense.set(today, price);
+      } else {
+        if (!historyMap.has(symbol)) historyMap.set(symbol, new Map());
+        historyMap.get(symbol)!.set(today, price);
+      }
+    }
+    if (liveRate && liveRate > 0) denseRateMap.set(today, liveRate);
 
     // 預計算每筆 lot 的 benchmark 基準：當初投入的 TWD 改買 ^GSPC 能換到多少「股」
     // spPrice 為 USD，故 TWD 投入需先用買入日匯率換成 USD 再除價；缺價/匯率時該 lot 視為 0（不污染整條線）
