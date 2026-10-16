@@ -192,7 +192,7 @@ export default function PortfolioSelector({
 
   if (loading) {
     return (
-      <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-card border border-border">
+      <div className="flex h-10 items-center gap-2 px-3 rounded-lg bg-card border border-border text-sm">
         <FolderOpen className="w-4 h-4 text-muted" />
         <span className="text-muted">載入中...</span>
       </div>
@@ -205,16 +205,18 @@ export default function PortfolioSelector({
       {/* 觸發按鈕 */}
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-card border border-border hover:bg-border/50 transition-colors"
+        className="flex h-10 items-center gap-1.5 px-3 rounded-lg bg-card border border-border text-sm hover:bg-border/50 transition-colors outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+        aria-haspopup="menu"
+        aria-expanded={isOpen}
       >
-        <FolderOpen className="w-4 h-4 text-primary" />
-        <span className="font-medium max-w-[200px] truncate">{displayName}</span>
-        <ChevronDown className={`w-4 h-4 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+        <FolderOpen className="w-4 h-4 shrink-0 text-primary" />
+        <span className="font-medium max-w-[6.5rem] truncate sm:max-w-[200px]">{displayName}</span>
+        <ChevronDown className={`w-4 h-4 shrink-0 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
       </button>
 
       {/* 下拉選單 */}
       {isOpen && (
-        <div className="absolute top-full left-0 mt-2 w-72 bg-card border border-border rounded-lg shadow-xl z-50 overflow-hidden">
+        <div className="fixed inset-x-4 mt-2 sm:absolute sm:inset-x-auto sm:right-0 sm:top-full sm:w-72 bg-card border border-border rounded-lg shadow-xl z-50 overflow-hidden">
           {/* 組合列表 */}
           <div className="max-h-64 overflow-y-auto">
             {portfolios.map((portfolio) => (

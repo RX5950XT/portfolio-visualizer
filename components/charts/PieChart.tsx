@@ -1,6 +1,6 @@
 "use client";
 
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts";
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Sector, type PieSectorDataItem } from "recharts";
 import type { HoldingWithQuote } from "@/types";
 
 interface Props {
@@ -29,6 +29,17 @@ const COLORS = [
 ];
 
 const CASH_COLOR = "#6b7280";
+
+// 滑鼠指到的扇形往外放大並加陰影，像浮起來
+function ActiveSector(props: PieSectorDataItem) {
+  return (
+    <Sector
+      {...props}
+      outerRadius={(props.outerRadius ?? 0) + 7}
+      style={{ filter: "drop-shadow(0 4px 8px rgba(0, 0, 0, 0.6))" }}
+    />
+  );
+}
 
 function CustomTooltip({
   active,
@@ -89,17 +100,18 @@ export default function PortfolioPieChart({
   }
 
   return (
-    <div className="flex flex-col sm:flex-row sm:items-start gap-4">
-      {/* 圓餅圖 */}
-      <div className="w-full h-[220px] sm:flex-1 sm:h-[260px]">
+    <div className="flex items-start gap-4">
+      {/* 圓餅圖：固定尺寸，上緣與右側圖例對齊 */}
+      <div className="h-[140px] w-[140px] shrink-0 sm:h-[170px] sm:w-[170px]">
         <ResponsiveContainer width="100%" height="100%">
           <PieChart>
             <Pie
               data={sortedData}
               cx="50%"
               cy="50%"
-              innerRadius={60}
-              outerRadius={100}
+              innerRadius="53%"
+              outerRadius="90%"
+              activeShape={ActiveSector}
               paddingAngle={2}
               dataKey="value"
             >
@@ -112,8 +124,8 @@ export default function PortfolioPieChart({
         </ResponsiveContainer>
       </div>
 
-      {/* Legend（手機 2 欄，桌面單欄縱向滾動） */}
-      <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 sm:block sm:w-[180px] sm:space-y-1 sm:overflow-y-auto sm:max-h-[280px] sm:pt-1 sm:pr-4">
+      {/* 圖例：單欄，項目多時在自身範圍內捲動 */}
+      <div className="min-w-0 flex-1 space-y-1 overflow-y-auto max-h-[240px]">
         {sortedData.map((entry, index) => {
           const percent = ((entry.value / total) * 100).toFixed(1);
           return (

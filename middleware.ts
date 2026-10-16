@@ -3,7 +3,8 @@ import type { NextRequest } from 'next/server';
 import { AUTH_COOKIE_NAME, verifyAuthToken } from '@/lib/auth-token';
 
 // 不需要認證的路徑
-const publicPaths = ['/', '/api/auth'];
+// MCP 使用專用 Bearer 金鑰，由端點驗證，不能接受網站登入 cookie。
+const publicPaths = ['/', '/api/auth', '/api/mcp'];
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;

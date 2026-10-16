@@ -1,12 +1,12 @@
 # AGENTS.md — Portfolio Visualizer 專案規範
 
-> 本檔與 `CLAUDE.md` 內容一致，皆為專案規範。設定與初始化細節（環境變數、migration 順序）見 `README.md`。
+> 本檔為專案規範唯一來源，`CLAUDE.md` 為相容入口。設定與初始化細節見 `README.md`。
 
 一律繁體中文（臺灣用語）回答，技術術語可保留英文；回覆精簡、只講結果。
 
 ## 專案
 - Portfolio Visualizer：單人使用的台美股投資組合視覺化工具。
-- 技術：Next.js 16（App Router）+ TypeScript + Tailwind CSS v4 + Supabase + Recharts + Vercel；AI 健診走 OpenRouter。
+- 技術：Next.js 16（App Router）+ TypeScript + Tailwind CSS v4 + Supabase + Recharts + Vercel；AI 透過 MCP 讀取投資現況、買賣紀錄，並可新增持股與賣出。
 
 ## 核心原則
 - 好品味、不破壞用戶行為、實用主義、簡潔執念。
@@ -25,9 +25,9 @@
 - 資料表**只 GRANT `service_role`**，不給 `anon`/`authenticated`；前端不直連 Supabase，一律經 `lib/supabase.createServerClient`。
 - RLS 啟用但**禁用 `USING(true)`**；不開放就不建 policy（RLS on + 無 policy = 預設拒絕）。
 - 新表上線：用 anon key 打 `GET /rest/v1/<table>` **必須回 401** 才算安全。
-- OpenRouter Key 存 `app_settings`（僅 service_role）、遮罩、永不回前端；secrets 一律環境變數或 DB，不硬編碼，`.env*` 不進 git。
+- MCP 金鑰只在建立時回傳一次，SHA-256 雜湊存 `app_settings.mcp_config`（僅 service_role）；管理 API 限 admin。`/api/mcp` 只接受專用 Bearer 金鑰，提供讀取工具（分析與網站共用 `lib/analytics/`）與 `holding_add`／`holding_sell`／`holding_update`／`cash_set`（與網站共用 `lib/trades.ts`），使用 `scopeQuery` 排除 Demo。secrets 不硬編碼，`.env*` 不進 git。
 - **登入密碼**以 scrypt 雜湊存 `app_settings.auth_config`（`lib/auth-config.ts`）；`SITE_PASSWORD`/`GUEST_PASSWORD` 僅首次引導，DB 有雜湊後 env 失效。Demo 密碼為公開常數 `demo`，開關存同 key。改密碼必須先驗證目前 admin 密碼；`/api/settings/auth` 永不回 salt/hash。
-- 認證走 HMAC 簽章 cookie；三種角色 `admin`／`guest`／`demo`。寫入端點 `requireWriteSession()`（放行 admin/demo、擋 guest），讀取端點套訪客可見性過濾；AI 與設定端點維持 admin 專屬。
+- 認證走 HMAC 簽章 cookie；三種角色 `admin`／`guest`／`demo`。寫入端點 `requireWriteSession()`（放行 admin/demo、擋 guest），讀取端點套訪客可見性過濾；設定端點維持 admin 專屬。MCP 金鑰不得授權網站其他 API。
 - **Demo 沙盒鐵則**：`portfolios`/`holdings`/`cash_balance`/`transactions` 帶 `demo_space`（真實資料為 NULL）。
   這 4 表的每個 SELECT/UPDATE/DELETE **一律經 `scopeQuery(query, session)`**、每個 INSERT **一律併入 `stampSpace(session)`**——這是隔離的唯一真相來源，漏一處就是資料外洩或誤刪。
   多個 delete 的端點（如 `portfolios/[id]` DELETE）**每一個 delete 都要套**。
@@ -38,3 +38,13 @@
 
 ## 完成前驗證
 - `npm run build`（零 TS 錯誤）、`npm run lint`、375px 響應式正常、深色主題一致、API 格式正確。
+
+<!-- BEGIN:nextjs-agent-rules -->
+
+## This is NOT the Next.js you know
+
+This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
+
+This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
+
+<!-- END:nextjs-agent-rules -->

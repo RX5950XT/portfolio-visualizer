@@ -1,0 +1,12 @@
+{
+  "name": "fast-glob",
+  "version": "3.3.1",
+  "description": "Local directory-only compatibility implementation for Next ESLint; not upstream fast-glob",
+  "private": true,
+  "main": "index.cjs",
+  "dependencies": {
+    "glob-parent": "6.0.2",
+    "minimatch": "10.2.6",
+    "tinyglobby": "0.2.15"
+  }
+}

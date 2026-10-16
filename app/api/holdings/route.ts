@@ -5,8 +5,8 @@ import {
   getVisiblePortfolioIdsForRole,
   requireWriteSession,
   scopeQuery,
-  stampSpace,
 } from '@/lib/auth';
+import { addHolding, TradeError } from '@/lib/trades';
 import type { Holding } from '@/types';
 
 // GET: 取得指定投資組合的持股
@@ -62,63 +62,10 @@ export async function POST(request: Request) {
     const auth = await requireWriteSession();
     if (!auth.ok) return auth.response;
 
-    const body = await request.json();
-    const { symbol, shares, cost_price, purchase_date, portfolio_id } = body;
-
-    // 驗證必填欄位
-    if (!symbol || !shares || !cost_price || !purchase_date) {
-      return NextResponse.json({ error: '請填寫所有必填欄位' }, { status: 400 });
-    }
-
-    // 判斷市場（台股或美股）
-    const upperSymbol = symbol.toUpperCase();
-    const market = upperSymbol.includes('.TW') ? 'TW' : 'US';
-
-    const supabase = createServerClient();
-
-    const insertData: {
-      symbol: string;
-      shares: number;
-      cost_price: number;
-      purchase_date: string;
-      market: string;
-      portfolio_id?: string;
-      demo_space?: string;
-    } = {
-      symbol: upperSymbol,
-      shares: parseFloat(shares),
-      cost_price: parseFloat(cost_price),
-      purchase_date,
-      market,
-      ...stampSpace(auth.session),
-    };
-
-    // 有指定組合時，驗證該組合屬於當前 session 的範圍：
-    // demo 帶真實組合 id、或任意非法/他人 id 都會匹配 0 筆而被擋，避免跨 space 參照污染
-    if (portfolio_id) {
-      const { data: owned } = await scopeQuery(
-        supabase.from('portfolios').select('id').eq('id', portfolio_id),
-        auth.session
-      ).maybeSingle();
-      if (!owned) {
-        return NextResponse.json({ error: '無效的投資組合' }, { status: 400 });
-      }
-      insertData.portfolio_id = portfolio_id;
-    }
-
-    const { data, error } = await supabase
-      .from('holdings')
-      .insert(insertData)
-      .select()
-      .single();
-
-    if (error) {
-      console.error('新增持股失敗:', error);
-      return NextResponse.json({ error: '新增持股失敗' }, { status: 500 });
-    }
-
+    const data = await addHolding(auth.session, await request.json());
     return NextResponse.json({ data: data as Holding });
-  } catch {
+  } catch (err) {
+    if (err instanceof TradeError) return NextResponse.json({ error: err.message }, { status: err.status });
     return NextResponse.json({ error: '伺服器錯誤' }, { status: 500 });
   }
 }

@@ -203,7 +203,7 @@ export default function TransactionList({ transactions, onDelete, onEditNotes, r
                       {onEditNotes && (
                         <button
                           onClick={() => onEditNotes(g.ids, g.symbol, g.notes)}
-                          className="p-1 rounded hover:bg-border text-muted hover:text-foreground"
+                          className="inline-flex h-10 w-10 items-center justify-center rounded-lg hover:bg-border text-muted hover:text-foreground"
                           title="編輯備註"
                         >
                           <Pencil className="w-4 h-4" />
@@ -212,7 +212,7 @@ export default function TransactionList({ transactions, onDelete, onEditNotes, r
                       {onDelete && (
                         <button
                           onClick={() => onDelete(g.ids, g.symbol)}
-                          className="p-1 rounded hover:bg-border text-danger"
+                          className="inline-flex h-10 w-10 items-center justify-center rounded-lg hover:bg-border text-danger"
                           title="刪除紀錄"
                         >
                           <Trash2 className="w-4 h-4" />

@@ -2,23 +2,29 @@
   "name": "portfolio-app",
   "version": "0.1.0",
   "private": true,
+  "workspaces": [
+    "tools/next-eslint-glob"
+  ],
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "node --experimental-strip-types --test lib/metrics.test.ts",
+    "test": "node --experimental-strip-types --test lib/metrics.test.ts lib/mcp.test.ts lib/chart-period.test.ts tools/next-eslint-glob/index.test.cjs",
     "test:coverage": "node --experimental-strip-types --experimental-test-coverage --test-coverage-include=lib/metrics.ts --test-coverage-lines=80 --test-coverage-functions=80 --test-coverage-branches=80 --test lib/metrics.test.ts"
   },
   "dependencies": {
+    "@modelcontextprotocol/server": "2.3.1",
     "@supabase/supabase-js": "^2.93.3",
     "lucide-react": "^0.563.0",
-    "next": "^16.2.10",
+    "next": "16.4.2",
     "react": "19.2.3",
     "react-dom": "19.2.3",
-    "react-markdown": "9.0.1",
     "recharts": "^3.7.0",
-    "remark-gfm": "4.0.0"
+    "zod": "4.6.7"
+  },
+  "overrides": {
+    "eslint-plugin-react-hooks": "7.0.1"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
@@ -27,6 +33,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
+    "fast-glob": "3.3.1",
     "tailwindcss": "^4",
     "typescript": "^5"
   }

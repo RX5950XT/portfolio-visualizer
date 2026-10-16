@@ -8,14 +8,12 @@ import {
   RefreshCw,
   LogOut,
   DollarSign,
-  Percent,
-  PieChart as PieChartIcon,
   Edit2,
+  ChevronUp,
+  ChevronDown,
+  CheckCircle2,
   Check,
   X,
-  History,
-  Coins,
-  Sparkles,
   Settings,
 } from "lucide-react";
 import type { Holding, HoldingWithQuote, AggregatedHolding } from "@/types";
@@ -24,8 +22,8 @@ import SellForm from "@/components/holdings/SellForm";
 import HoldingList from "@/components/holdings/HoldingList";
 import PortfolioPieChart from "@/components/charts/PieChart";
 import AssetTrendChart from "@/components/charts/AssetTrendChart";
-import DailyPnLChart from "@/components/charts/DailyPnLChart";
-import MetricsPanel from "@/components/charts/MetricsPanel";
+import BenchmarkToggle from "@/components/charts/BenchmarkToggle";
+import AnalysisPanels from "@/components/AnalysisPanels";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import PortfolioSelector from "@/components/portfolios/PortfolioSelector";
 import Logo from "@/components/Logo";
@@ -36,6 +34,9 @@ const quoteCache = new Map<
   { price: number; currency: string; timestamp: number }
 >();
 const CACHE_TTL = 60000; // 1 分鐘快取
+
+// 現金輸入框上下鈕每次增減的金額
+const CASH_STEP = 1000;
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -48,7 +49,11 @@ export default function DashboardPage() {
   const [exchangeRate, setExchangeRate] = useState<number>(32);
   const [totalValueTWD, setTotalValueTWD] = useState(0);
   const [totalCostTWD, setTotalCostTWD] = useState(0);
+  // S&P 500 對照線開關，預設開啟（功能目的即為對比大盤）
+  const [showBenchmark, setShowBenchmark] = useState(true);
   const [totalGain, setTotalGain] = useState(0);
+  // 已實現損益：賣出紀錄 realized_pnl_twd 加總；讀取失敗為 null，不冒充 0
+  const [realizedPnl, setRealizedPnl] = useState<number | null>(null);
   const [totalGainPercent, setTotalGainPercent] = useState(0);
   const [weightedExpenseRatio, setWeightedExpenseRatio] = useState<
     number | null
@@ -76,14 +81,6 @@ export default function DashboardPage() {
     }
     return null;
   });
-  const [currentPortfolioName, setCurrentPortfolioName] =
-    useState<string>(() => {
-      if (typeof window !== 'undefined') {
-        return new URLSearchParams(window.location.search).get('name') || '新的投資組合';
-      }
-      return '新的投資組合';
-    });
-
   // 預設組合是否已解析：URL 已帶 portfolio_id 視為已解析；否則先載入 is_default 組合，
   // 避免在選定組合前就用 null 抓到「所有組合合併」的資料而閃動
   const [portfolioReady, setPortfolioReady] = useState<boolean>(() => {
@@ -100,7 +97,7 @@ export default function DashboardPage() {
   const [userRole, setUserRole] = useState<"admin" | "guest" | "demo" | null>(null);
   const isAdmin = userRole === "admin";
   const isDemo = userRole === "demo";
-  // demo 可自由編輯自己的沙盒；設定／AI 仍限 admin，故兩者不可混用同一個旗標
+  // demo 可自由編輯自己的沙盒；設定仍限 admin。
   const canEdit = isAdmin || isDemo;
 
   // 載入持股資料
@@ -191,6 +188,23 @@ export default function DashboardPage() {
     }
   }, [currentPortfolioId]);
 
+  // 取得已實現損益（賣出紀錄加總）
+  const loadRealizedPnl = useCallback(async (): Promise<number | null> => {
+    try {
+      const url = currentPortfolioId
+        ? `/api/transactions?portfolio_id=${currentPortfolioId}`
+        : "/api/transactions";
+      const res = await fetch(url);
+      const { data, error } = await res.json();
+      if (error || !Array.isArray(data)) return null;
+      return data
+        .filter((t: { type?: string }) => t.type === "sell")
+        .reduce((sum: number, t: { realized_pnl_twd?: number | null }) => sum + Number(t.realized_pnl_twd ?? 0), 0);
+    } catch {
+      return null;
+    }
+  }, [currentPortfolioId]);
+
   // 更新現金餘額
   const updateCashBalance = async (amount: number) => {
     try {
@@ -216,14 +230,16 @@ export default function DashboardPage() {
   const refreshData = useCallback(async () => {
     setRefreshing(true);
 
-    const [holdingsData, rate, cash] = await Promise.all([
+    const [holdingsData, rate, cash, realized] = await Promise.all([
       loadHoldings(),
       fetchExchangeRate(),
       loadCashBalance(),
+      loadRealizedPnl(),
     ]);
 
     setExchangeRate(rate);
     setCashBalance(cash);
+    setRealizedPnl(realized);
 
     if (holdingsData.length === 0) {
       setHoldings([]);
@@ -341,6 +357,7 @@ export default function DashboardPage() {
     fetchSingleQuote,
     fetchExpenseRatio,
     loadCashBalance,
+    loadRealizedPnl,
   ]);
 
   // 無 URL portfolio_id 時，先解析預設組合（is_default，否則第一個）再載入
@@ -355,7 +372,6 @@ export default function DashboardPage() {
           const def =
             data.find((p: { is_default?: boolean }) => p.is_default) ?? data[0];
           setCurrentPortfolioId(def.id);
-          setCurrentPortfolioName(def.name);
         }
       } catch (err) {
         console.error('解析預設組合失敗:', err);
@@ -455,6 +471,10 @@ export default function DashboardPage() {
     setCashInput("");
   };
 
+  const stockValue = totalValueTWD - cashBalance;
+  const stockPct = totalValueTWD > 0 ? (stockValue / totalValueTWD) * 100 : 0;
+  const cashPct = totalValueTWD > 0 ? (cashBalance / totalValueTWD) * 100 : 0;
+
   // 格式化金額
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat("zh-TW", {
@@ -491,304 +511,242 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* Header */}
-      <header className="flex flex-wrap items-center justify-between gap-4 mb-6">
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="flex items-center gap-2">
-            <Logo className="w-7 h-7 sm:w-8 sm:h-8 text-foreground" />
-            <h1 className="text-lg sm:text-xl md:text-2xl font-bold">
-              Portfolio Visualizer
-            </h1>
-          </div>
+      {/* Header：右側依序為 新增持股、組合清單、設定、重新整理、登出；手機換行時整排靠右 */}
+      <header className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3 mb-6">
+        <div className="flex items-center gap-2">
+          <Logo className="w-7 h-7 sm:w-8 sm:h-8 text-foreground" />
+          <h1 className="text-lg sm:text-xl md:text-2xl font-bold">
+            Portfolio Visualizer
+          </h1>
+        </div>
+        <div className="ml-auto flex flex-wrap items-center justify-end gap-1.5 sm:gap-2">
+          {canEdit && (
+            <button
+              onClick={() => setShowForm(true)}
+              className="btn-primary flex h-10 items-center justify-center gap-1.5 px-3! text-sm font-medium outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+              aria-label="新增持股"
+            >
+              <Plus className="w-4 h-4" aria-hidden="true" />
+              <span>新增<span className="hidden sm:inline">持股</span></span>
+            </button>
+          )}
           <PortfolioSelector
             currentPortfolioId={currentPortfolioId}
             onSelectPortfolio={(portfolio) => {
               setCurrentPortfolioId(portfolio.id);
-              setCurrentPortfolioName(portfolio.name);
             }}
             readOnly={!canEdit}
           />
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => {
-              const params = new URLSearchParams();
-              if (currentPortfolioId) params.set('portfolio_id', currentPortfolioId);
-              if (currentPortfolioName) params.set('name', currentPortfolioName);
-              const qs = params.toString();
-              router.push(`/transactions${qs ? `?${qs}` : ''}`);
-            }}
-            className="p-2 rounded-lg hover:bg-card transition-colors"
-            title="交易紀錄"
-          >
-            <History className="w-5 h-5" />
-          </button>
-          <button
-            onClick={() => {
-              const params = new URLSearchParams();
-              if (currentPortfolioId) params.set('portfolio_id', currentPortfolioId);
-              if (currentPortfolioName) params.set('name', currentPortfolioName);
-              const qs = params.toString();
-              router.push(`/dividends${qs ? `?${qs}` : ''}`);
-            }}
-            className="p-2 rounded-lg hover:bg-card transition-colors"
-            title="配息追蹤"
-          >
-            <Coins className="w-5 h-5" />
-          </button>
-          <button
-            onClick={() => {
-              const params = new URLSearchParams();
-              if (currentPortfolioId) params.set('portfolio_id', currentPortfolioId);
-              if (currentPortfolioName) params.set('name', currentPortfolioName);
-              const qs = params.toString();
-              router.push(`/insights${qs ? `?${qs}` : ''}`);
-            }}
-            className="p-2 rounded-lg hover:bg-card transition-colors"
-            title="配置透視與 AI 健診"
-          >
-            <Sparkles className="w-5 h-5" />
-          </button>
-          {isAdmin && (
+          <div className="flex items-center">
+            {isAdmin && (
+              <button
+                onClick={() => router.push('/settings')}
+                className="flex h-10 w-9 items-center justify-center rounded-lg transition-colors hover:bg-card sm:w-10"
+                title="設定"
+                aria-label="設定"
+              >
+                <Settings className="w-5 h-5" />
+              </button>
+            )}
             <button
-              onClick={() => router.push('/settings')}
-              className="p-2 rounded-lg hover:bg-card transition-colors"
-              title="設定"
+              onClick={() => {
+                quoteCache.clear();
+                refreshData();
+              }}
+              disabled={refreshing}
+              className="flex h-10 w-9 items-center justify-center rounded-lg transition-colors hover:bg-card sm:w-10"
+              title="重新整理"
+              aria-label="重新整理"
             >
-              <Settings className="w-5 h-5" />
+              <RefreshCw
+                className={`w-5 h-5 ${refreshing ? "animate-spin" : ""}`}
+              />
             </button>
-          )}
-          <button
-            onClick={() => {
-              quoteCache.clear();
-              refreshData();
-            }}
-            disabled={refreshing}
-            className="p-2 rounded-lg hover:bg-card transition-colors"
-            title="重新整理"
-          >
-            <RefreshCw
-              className={`w-5 h-5 ${refreshing ? "animate-spin" : ""}`}
-            />
-          </button>
-          <button
-            onClick={handleLogout}
-            className="p-2 rounded-lg hover:bg-card transition-colors text-muted hover:text-danger"
-            title="登出"
-          >
-            <LogOut className="w-5 h-5" />
-          </button>
+            <button
+              onClick={handleLogout}
+              className="flex h-10 w-9 items-center justify-center rounded-lg transition-colors hover:bg-card sm:w-10 text-muted hover:text-danger"
+              title="登出"
+              aria-label="登出"
+            >
+              <LogOut className="w-5 h-5" />
+            </button>
+          </div>
         </div>
       </header>
 
-      {/* 上方：左側 2×2 卡片 + 右側資產配置 */}
-      <div className="grid grid-cols-1 lg:grid-cols-[2fr_3fr] gap-4 mb-6">
-        {/* 左側 2×2 小卡片 */}
-        <div className="grid grid-cols-2 gap-4">
-          {/* 總資產 */}
-          <div className="card">
-            <div className="flex items-center gap-2 text-muted mb-2">
-              <DollarSign className="w-4 h-4" />
+      {/* 上方：摘要卡、資產配置、股票總值走勢（xl 三欄；md 前兩者並排、走勢跨欄） */}
+      <div className="grid grid-cols-1 gap-4 mb-6 md:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.5fr)]">
+        {/* 左側：總資產（股票／現金）與總未實現損益 */}
+        <div className="flex min-w-0 flex-col gap-4">
+          <div className="card p-4! sm:p-6!">
+            <div className="flex items-center gap-2 text-muted mb-1">
+              <DollarSign className="w-4 h-4" aria-hidden="true" />
               <span className="text-sm">總資產</span>
             </div>
-            <p className="text-2xl font-bold">{formatCurrency(totalValueTWD)}</p>
-            <div className="mt-2 space-y-1 text-sm">
-              <div className="flex items-center justify-between text-muted">
-                <span className="font-medium">股票</span>
-                <span>
-                  {formatCurrency(totalValueTWD - cashBalance)}
-                  {totalValueTWD > 0 && (
-                    <span className="ml-1 text-xs">
-                      ({(((totalValueTWD - cashBalance) / totalValueTWD) * 100).toFixed(1)}%)
-                    </span>
-                  )}
-                </span>
+            <p className="text-2xl sm:text-3xl font-bold tabular-nums">{formatCurrency(totalValueTWD)}</p>
+            <div className="mt-4 flex h-2 overflow-hidden rounded-full bg-border" aria-hidden="true">
+              <div className="bg-primary transition-[width] duration-500" style={{ width: `${stockPct}%` }} />
+              <div className="bg-muted/70 transition-[width] duration-500" style={{ width: `${cashPct}%` }} />
+            </div>
+            <dl className="mt-3 divide-y divide-border">
+              <div className="flex min-h-14 items-center justify-between gap-3">
+                <dt className="flex items-center gap-2 text-sm text-muted">
+                  <span className="h-2.5 w-2.5 rounded-full bg-primary" aria-hidden="true" />股票
+                </dt>
+                <dd className="text-right tabular-nums">
+                  <span className="font-semibold">{formatCurrency(stockValue)}</span>
+                  <span className="ml-2 text-xs text-muted">{stockPct.toFixed(1)}%</span>
+                </dd>
               </div>
-              <div className="flex items-center justify-between text-muted">
-                <span className="flex items-center gap-1 font-medium">
-                  現金
-                  {!isEditingCash && canEdit && (
-                    <button
-                      onClick={handleEditCash}
-                      className="p-0.5 rounded hover:bg-border transition-colors"
-                      title="編輯現金"
-                    >
-                      <Edit2 className="w-3 h-3" />
-                    </button>
-                  )}
-                </span>
+              <div className="flex min-h-14 flex-wrap items-center justify-between gap-x-3 gap-y-2 py-2">
+                <dt className="flex items-center gap-2 text-sm text-muted">
+                  <span className="h-2.5 w-2.5 rounded-full bg-muted/70" aria-hidden="true" />現金
+                </dt>
                 {isEditingCash ? (
-                  <div className="flex items-center gap-1">
-                    <input
-                      type="number"
-                      value={cashInput}
-                      onChange={(e) => setCashInput(e.target.value)}
-                      className="w-24 px-1.5 py-0.5 bg-background border border-border rounded text-sm text-right"
-                      placeholder="0"
-                      autoFocus
-                    />
-                    <button
-                      onClick={handleSaveCash}
-                      className="p-1 rounded bg-up text-white hover:bg-up/80"
-                      title="儲存"
+                  <dd className="w-full">
+                    <form
+                      className="flex items-center gap-2"
+                      onSubmit={(e) => { e.preventDefault(); void handleSaveCash(); }}
+                      onKeyDown={(e) => { if (e.key === "Escape") handleCancelCash(); }}
                     >
-                      <Check className="w-3 h-3" />
-                    </button>
-                    <button
-                      onClick={handleCancelCash}
-                      className="p-1 rounded bg-border hover:bg-border/80"
-                      title="取消"
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
-                  </div>
+                      <label className="relative min-w-0 flex-1">
+                        <span className="sr-only">現金金額（新台幣）</span>
+                        <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted">NT$</span>
+                        <input
+                          type="number"
+                          inputMode="decimal"
+                          min="0"
+                          step="any"
+                          value={cashInput}
+                          onChange={(e) => setCashInput(e.target.value)}
+                          onFocus={(e) => e.target.select()}
+                          className="no-spinner h-11 w-full pl-12! pr-10! text-right text-base tabular-nums"
+                          placeholder="0"
+                          autoFocus
+                        />
+                        <span className="absolute inset-y-1 right-1 flex w-8 flex-col overflow-hidden rounded-md border border-border">
+                          {[
+                            { step: CASH_STEP, label: "增加", Icon: ChevronUp },
+                            { step: -CASH_STEP, label: "減少", Icon: ChevronDown },
+                          ].map(({ step, label, Icon }) => (
+                            <button
+                              key={label}
+                              type="button"
+                              tabIndex={-1}
+                              onClick={() => setCashInput((v) => String(Math.max(0, (parseFloat(v) || 0) + step)))}
+                              className="flex flex-1 items-center justify-center text-muted transition-colors hover:bg-primary/15 hover:text-primary"
+                              aria-label={`${label} ${CASH_STEP.toLocaleString("zh-TW")} 元`}
+                            >
+                              <Icon className="h-3.5 w-3.5" aria-hidden="true" />
+                            </button>
+                          ))}
+                        </span>
+                      </label>
+                      <button type="submit" className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-up text-white hover:bg-up/80" aria-label="儲存現金">
+                        <Check className="w-5 h-5" />
+                      </button>
+                      <button type="button" onClick={handleCancelCash} className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-border hover:bg-border/70" aria-label="取消">
+                        <X className="w-5 h-5" />
+                      </button>
+                    </form>
+                  </dd>
                 ) : (
-                  <span>
-                    {formatCurrency(cashBalance)}
-                    {totalValueTWD > 0 && (
-                      <span className="ml-1 text-xs">
-                        ({((cashBalance / totalValueTWD) * 100).toFixed(1)}%)
-                      </span>
+                  <dd className="text-right tabular-nums">
+                    {canEdit ? (
+                      <button
+                        onClick={handleEditCash}
+                        className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-dashed border-border px-3 transition-colors hover:border-primary hover:bg-primary/5 focus-visible:outline-2 focus-visible:outline-primary"
+                        aria-label={`修改現金，目前 ${formatCurrency(cashBalance)}`}
+                      >
+                        <span className="font-semibold">{formatCurrency(cashBalance)}</span>
+                        <span className="text-xs text-muted">{cashPct.toFixed(1)}%</span>
+                        <Edit2 className="w-3.5 h-3.5 text-primary" aria-hidden="true" />
+                      </button>
+                    ) : (
+                      <>
+                        <span className="font-semibold">{formatCurrency(cashBalance)}</span>
+                        <span className="ml-2 text-xs text-muted">{cashPct.toFixed(1)}%</span>
+                      </>
                     )}
-                  </span>
+                  </dd>
                 )}
               </div>
-            </div>
+            </dl>
           </div>
 
-          {/* 持股分佈 */}
-          <div className="card">
-            <div className="flex items-center gap-2 text-muted mb-2">
-              <PieChartIcon className="w-4 h-4" />
-              <span className="text-sm">持股分佈</span>
-            </div>
-            <div className="space-y-2">
-              <p className="text-lg font-bold">
-                台股 {aggregatedHoldings.filter((h) => h.market === "TW").length} 檔 / 美股{" "}
-                {aggregatedHoldings.filter((h) => h.market === "US").length} 檔
-              </p>
-              <div className="text-sm space-y-1">
-                {(() => {
-                  const twValue = aggregatedHoldings
-                    .filter((h) => h.market === "TW")
-                    .reduce((sum, h) => sum + (h.currentValue || 0), 0);
-                  const usValue = aggregatedHoldings
-                    .filter((h) => h.market === "US")
-                    .reduce((sum, h) => sum + (h.currentValue || 0), 0);
-                  const twWeight =
-                    totalValueTWD > 0 ? (twValue / totalValueTWD) * 100 : 0;
-                  const usWeight =
-                    totalValueTWD > 0 ? (usValue / totalValueTWD) * 100 : 0;
-                  const cashWeight =
-                    totalValueTWD > 0 ? (cashBalance / totalValueTWD) * 100 : 0;
-                  return (
-                    <>
-                      <div className="flex justify-between">
-                        <span className="text-muted font-medium">台股</span>
-                        <span className="font-medium">{twWeight.toFixed(1)}%</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-muted font-medium">美股</span>
-                        <span className="font-medium">{usWeight.toFixed(1)}%</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-muted font-medium">現金</span>
-                        <span className="font-medium">{cashWeight.toFixed(1)}%</span>
-                      </div>
-                    </>
-                  );
-                })()}
+          <div className="card p-4! sm:p-6!">
+            <div className="grid grid-cols-2 divide-x divide-border">
+              <div className="min-w-0 pr-4">
+                <div className="flex items-center gap-2 text-muted mb-1">
+                  <TrendingUp className="w-4 h-4 shrink-0" aria-hidden="true" />
+                  <span className="text-sm">總未實現損益</span>
+                </div>
+                <p className={`text-xl sm:text-2xl font-bold tabular-nums ${totalGain >= 0 ? "text-up" : "text-down"}`}>
+                  {totalGain >= 0 ? "+" : ""}
+                  {formatCurrency(totalGain)}
+                </p>
+                <p className={`text-sm font-medium tabular-nums ${totalGain >= 0 ? "text-up" : "text-down"}`}>
+                  {totalGainPercent >= 0 ? "+" : ""}
+                  {totalGainPercent.toFixed(2)}%
+                </p>
+                <p className="mt-1 text-xs text-muted">現有持股，市值減成本</p>
+              </div>
+              <div className="min-w-0 pl-4">
+                <div className="flex items-center gap-2 text-muted mb-1">
+                  <CheckCircle2 className="w-4 h-4 shrink-0" aria-hidden="true" />
+                  <span className="text-sm">總已實現損益</span>
+                </div>
+                {realizedPnl === null ? (
+                  <p className="text-xl sm:text-2xl font-bold text-muted">—</p>
+                ) : (
+                  <p className={`text-xl sm:text-2xl font-bold tabular-nums ${realizedPnl >= 0 ? "text-up" : "text-down"}`}>
+                    {realizedPnl >= 0 ? "+" : ""}
+                    {formatCurrency(realizedPnl)}
+                  </p>
+                )}
+                <p className="mt-1 text-xs text-muted">已賣出部分的損益</p>
               </div>
             </div>
-          </div>
-
-          {/* 總損益 */}
-          <div className="card">
-            <div className="flex items-center gap-2 text-muted mb-2">
-              <TrendingUp className="w-4 h-4" />
-              <span className="text-sm">總損益</span>
-            </div>
-            <p
-              className={`text-2xl font-bold ${totalGain >= 0 ? "text-up" : "text-down"}`}
-            >
-              {totalGain >= 0 ? "+" : ""}
-              {formatCurrency(totalGain)}
-            </p>
-            <p className={`text-sm ${totalGain >= 0 ? "text-up" : "text-down"}`}>
-              {totalGainPercent >= 0 ? "+" : ""}
-              {totalGainPercent.toFixed(2)}%
-            </p>
-          </div>
-
-          {/* ETF 加權費用率 */}
-          <div className="card">
-            <div className="flex items-center gap-2 text-muted mb-2">
-              <Percent className="w-4 h-4" />
-              <span className="text-sm">ETF 加權費用率</span>
-            </div>
-            <p className="text-2xl font-bold">
-              {weightedExpenseRatio !== null
-                ? `${(weightedExpenseRatio * 100).toFixed(3)}%`
-                : "—"}
-            </p>
           </div>
         </div>
 
-        {/* 右側資產配置圓餅圖 */}
-        <div className="card">
-          <h2 className="text-lg font-semibold mb-4">資產配置</h2>
+        {/* 資產配置 */}
+        <div className="card p-4! sm:p-6!">
+          <h2 className="text-lg font-semibold mb-3">資產配置</h2>
           {pieChartData.length > 0 && pieChartData.some((d) => d.value > 0) ? (
             <PortfolioPieChart holdings={aggregatedHoldings} cashBalance={cashBalance} />
           ) : (
-            <div className="h-64 flex items-center justify-center text-muted">
+            <div className="h-48 flex items-center justify-center text-muted">
               尚無資產資料
             </div>
           )}
         </div>
-      </div>
 
-      {/* 下方圖表：2 欄 */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-        {/* 總資產走勢圖 */}
-        <div className="card">
-          <h2 className="text-lg font-semibold mb-4">總資產走勢</h2>
-          <div className="h-[350px]">
+        {/* 股票總值走勢圖 */}
+        <div className="card flex flex-col p-4! sm:p-6! md:col-span-2 xl:col-span-1">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <h2 className="text-lg font-semibold">股票總值走勢</h2>
+            <BenchmarkToggle on={showBenchmark} onToggle={() => setShowBenchmark((v) => !v)} />
+          </div>
+          <div className="h-[320px] xl:h-auto xl:min-h-[320px] xl:flex-1">
             <AssetTrendChart
               portfolioId={currentPortfolioId}
               refreshKey={chartRefreshKey}
-            />
-          </div>
-        </div>
-
-        {/* 每日損益變化圖 */}
-        <div className="card">
-          <h2 className="text-lg font-semibold mb-4">每日損益變化</h2>
-          <div className="h-[350px]">
-            <DailyPnLChart
-              portfolioId={currentPortfolioId}
-              refreshKey={chartRefreshKey}
+              showBenchmark={showBenchmark}
             />
           </div>
         </div>
       </div>
 
-      {/* 進階績效指標（可摺疊，展開後才載入） */}
-      <MetricsPanel portfolioId={currentPortfolioId} refreshKey={chartRefreshKey} />
+      <AnalysisPanels
+        portfolioId={currentPortfolioId}
+        refreshKey={chartRefreshKey}
+        onTransactionsChange={refreshData}
+      />
 
       {/* 持股清單 */}
       <div className="card">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold">持股清單</h2>
-          {canEdit && (
-            <button
-              onClick={() => setShowForm(true)}
-              className="btn-primary flex items-center gap-2"
-            >
-              <Plus className="w-4 h-4" />
-              <span className="hidden sm:inline">新增持股</span>
-            </button>
-          )}
-        </div>
+        <h2 className="text-lg font-semibold mb-4">持股清單</h2>
 
         <HoldingList
           holdings={aggregatedHoldings}
@@ -801,6 +759,7 @@ export default function DashboardPage() {
           onDelete={handleDeleteClick}
           onSell={canEdit ? (h) => setSellTarget(h) : undefined}
           readOnly={!canEdit}
+          weightedExpenseRatio={weightedExpenseRatio}
         />
       </div>
 

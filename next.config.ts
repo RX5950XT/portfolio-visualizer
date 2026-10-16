@@ -16,7 +16,7 @@ const csp = [
   "font-src 'self'",
   "style-src 'self' 'unsafe-inline'",
   `script-src ${scriptSrc}`,
-  // 前端只打同源 /api/*；資料抓取（Yahoo/OpenRouter）都在伺服器端，故 connect 限 self
+  // 股價由伺服器取得，前端只需同源 /api/*。
   "connect-src 'self'",
 ].join("; ");
 

@@ -16,7 +16,8 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from 'recharts';
-import { Activity, ChevronDown, ChevronUp, RefreshCw } from 'lucide-react';
+import { RefreshCw } from 'lucide-react';
+import BenchmarkToggle from '@/components/charts/BenchmarkToggle';
 
 interface YearReturn {
   year: number;
@@ -57,7 +58,7 @@ interface Metrics {
   returns?: PeriodReturns;
   benchmark?: BenchmarkSummary;
   drawdown?: DrawdownSummary;
-  underwater: { date: string; drawdown: number }[];
+  underwater: { date: string; drawdown: number; benchmark?: number | null }[];
 }
 
 interface Props {
@@ -75,11 +76,11 @@ const pct = (v: number | null, sign = false): string => {
 };
 
 export default function MetricsPanel({ portfolioId, refreshKey }: Props): ReactElement {
-  const [open, setOpen] = useState(false);
   const [data, setData] = useState<Metrics | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showBenchmark, setShowBenchmark] = useState(true);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -100,10 +101,9 @@ export default function MetricsPanel({ portfolioId, refreshKey }: Props): ReactE
     }
   }, [portfolioId]);
 
-  // 展開後才載入，避免拖慢 dashboard；portfolio/refresh 變動時若已展開則重抓
   useEffect(() => {
-    if (open) fetchData();
-  }, [open, fetchData, refreshKey]);
+    fetchData();
+  }, [fetchData, refreshKey]);
 
   const formatDate = (dateStr: string): string => {
     const d = new Date(dateStr);
@@ -117,14 +117,17 @@ export default function MetricsPanel({ portfolioId, refreshKey }: Props): ReactE
     label,
   }: {
     active?: boolean;
-    payload?: { value?: number }[];
+    payload?: { value?: number; dataKey?: string }[];
     label?: string;
   }): ReactElement | null => {
     if (active && payload && payload.length) {
+      const value = (key: string) => payload.find((p) => p.dataKey === key)?.value;
+      const bench = value('benchmark');
       return (
         <div className="bg-card border border-border rounded-lg p-2 shadow-lg">
           <p className="text-xs text-muted mb-0.5">{formatDate(String(label))}</p>
-          <p className="text-sm font-semibold text-down">回撤 {pct(Number(payload[0].value ?? 0))}</p>
+          <p className="text-sm font-semibold text-down">投組回撤 {pct(Number(value('drawdown') ?? 0))}</p>
+          {typeof bench === 'number' && <p className="text-sm font-semibold text-foreground">S&amp;P 500 {pct(bench)}</p>}
         </div>
       );
     }
@@ -135,123 +138,124 @@ export default function MetricsPanel({ portfolioId, refreshKey }: Props): ReactE
     data && data.underwater.length
       ? data.underwater.reduce((min, p) => (p.drawdown < min ? p.drawdown : min), 0)
       : 0;
+  const hasBenchmark = !!data?.underwater.some((p) => typeof p.benchmark === 'number');
+  const benchmarkTrough = hasBenchmark && data
+    ? data.underwater.reduce((min, p) => Math.min(min, p.benchmark ?? 0), 0)
+    : null;
+  const chartTrough = showBenchmark && benchmarkTrough !== null ? Math.min(trough, benchmarkTrough) : trough;
 
   return (
-    <div className="card mb-6">
-      <button
-        onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center justify-between"
-      >
-        <div className="flex items-center gap-2">
-          <Activity className="w-5 h-5 text-primary" />
-          <span className="font-semibold">績效分析</span>
+    <div className="min-w-0">
+      {loading && !loaded ? (
+        <div className="h-40 flex items-center justify-center">
+          <RefreshCw className="w-6 h-6 animate-spin text-primary" />
         </div>
-        {open ? (
-          <ChevronUp className="w-5 h-5 text-muted" />
-        ) : (
-          <ChevronDown className="w-5 h-5 text-muted" />
-        )}
-      </button>
+      ) : error ? (
+        <div className="h-40 flex items-center justify-center text-danger">{error}</div>
+      ) : !data ? (
+        <div className="h-40 flex items-center justify-center text-muted">
+          尚無足夠資料計算績效指標
+        </div>
+      ) : (
+        <>
+          <ReturnsSection
+            returns={data.returns}
+            xirr={data.xirr}
+            benchmark={data.benchmark}
+          />
 
-      {open && (
-        <div className="mt-4">
-          {loading && !loaded ? (
-            <div className="h-40 flex items-center justify-center">
-              <RefreshCw className="w-6 h-6 animate-spin text-primary" />
-            </div>
-          ) : error ? (
-            <div className="h-40 flex items-center justify-center text-danger">{error}</div>
-          ) : !data ? (
-            <div className="h-40 flex items-center justify-center text-muted">
-              尚無足夠資料計算績效指標
-            </div>
-          ) : (
-            <>
-              <ReturnsSection
-                returns={data.returns}
-                xirr={data.xirr}
-                benchmark={data.benchmark}
+          <section className="mb-5">
+            <h3 className="text-sm font-semibold mb-3">風險與交易品質</h3>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-3">
+              <Metric label="年化波動率" value={pct(data.volatility)} />
+              <Metric
+                label="Sharpe"
+                value={data.sharpe === null ? 'N/A' : data.sharpe.toFixed(2)}
+                positive={data.sharpe !== null && data.sharpe >= 1}
               />
+              <Metric
+                label="Sortino"
+                value={data.sortino === null ? 'N/A' : data.sortino.toFixed(2)}
+                positive={data.sortino !== null && data.sortino >= 1}
+              />
+              <Metric
+                label="勝率"
+                value={
+                  data.winRate.total > 0
+                    ? `${(data.winRate.rate * 100).toFixed(0)}%`
+                    : 'N/A'
+                }
+                sub={
+                  data.winRate.total > 0
+                    ? `${data.winRate.wins}/${data.winRate.total}`
+                    : undefined
+                }
+              />
+            </div>
+          </section>
 
-              <section className="mb-5">
-                <h3 className="text-sm font-semibold mb-3">風險與交易品質</h3>
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-3">
-                  <Metric label="年化波動率" value={pct(data.volatility)} />
-                  <Metric
-                    label="Sharpe"
-                    value={data.sharpe === null ? 'N/A' : data.sharpe.toFixed(2)}
-                    positive={data.sharpe !== null && data.sharpe >= 1}
+          <DrawdownHeader
+            summary={data.drawdown}
+            fallbackTrough={trough}
+            benchmarkTrough={showBenchmark ? benchmarkTrough : null}
+            toggle={hasBenchmark ? <BenchmarkToggle on={showBenchmark} onToggle={() => setShowBenchmark((v) => !v)} /> : null}
+          />
+          <div className="h-48">
+            <ResponsiveContainer
+              width="100%"
+              height="100%"
+              minWidth={0}
+              initialDimension={{ width: 300, height: 192 }}
+            >
+              <AreaChart
+                data={data.underwater}
+                margin={{ top: 5, right: 20, left: 10, bottom: 5 }}
+              >
+                <defs>
+                  <linearGradient id="ddFill" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#ef4444" stopOpacity={0.05} />
+                    <stop offset="100%" stopColor="#ef4444" stopOpacity={0.5} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="#333" vertical={false} />
+                <XAxis
+                  dataKey="date"
+                  tickFormatter={formatDate}
+                  stroke="#bdbdbd"
+                  fontSize={12}
+                  tickLine={false}
+                  interval={Math.max(0, Math.floor(data.underwater.length / 6))}
+                />
+                <YAxis
+                  tickFormatter={(v) => `${(v * 100).toFixed(0)}%`}
+                  stroke="#bdbdbd"
+                  fontSize={12}
+                  tickLine={false}
+                  axisLine={false}
+                  domain={[Math.min(chartTrough * 1.1, -0.01), 0]}
+                />
+                <Tooltip content={<UnderwaterTooltip />} />
+                <Area
+                  type="monotone"
+                  dataKey="drawdown"
+                  stroke="#ef4444"
+                  fill="url(#ddFill)"
+                  strokeWidth={1.5}
+                />
+                {showBenchmark && hasBenchmark && (
+                  <Area
+                    type="monotone"
+                    dataKey="benchmark"
+                    stroke="#ffffff"
+                    fill="none"
+                    strokeWidth={1.25}
+                    connectNulls
                   />
-                  <Metric
-                    label="Sortino"
-                    value={data.sortino === null ? 'N/A' : data.sortino.toFixed(2)}
-                    positive={data.sortino !== null && data.sortino >= 1}
-                  />
-                  <Metric
-                    label="勝率"
-                    value={
-                      data.winRate.total > 0
-                        ? `${(data.winRate.rate * 100).toFixed(0)}%`
-                        : 'N/A'
-                    }
-                    sub={
-                      data.winRate.total > 0
-                        ? `${data.winRate.wins}/${data.winRate.total}`
-                        : undefined
-                    }
-                  />
-                </div>
-              </section>
-
-              <DrawdownHeader summary={data.drawdown} fallbackTrough={trough} />
-              <div className="h-48">
-                <ResponsiveContainer
-                  width="100%"
-                  height="100%"
-                  minWidth={0}
-                  initialDimension={{ width: 300, height: 192 }}
-                >
-                  <AreaChart
-                    data={data.underwater}
-                    margin={{ top: 5, right: 20, left: 10, bottom: 5 }}
-                  >
-                    <defs>
-                      <linearGradient id="ddFill" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="#ef4444" stopOpacity={0.05} />
-                        <stop offset="100%" stopColor="#ef4444" stopOpacity={0.5} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#333" vertical={false} />
-                    <XAxis
-                      dataKey="date"
-                      tickFormatter={formatDate}
-                      stroke="#666"
-                      fontSize={12}
-                      tickLine={false}
-                      interval={Math.max(0, Math.floor(data.underwater.length / 6))}
-                    />
-                    <YAxis
-                      tickFormatter={(v) => `${(v * 100).toFixed(0)}%`}
-                      stroke="#666"
-                      fontSize={12}
-                      tickLine={false}
-                      axisLine={false}
-                      domain={[Math.min(trough * 1.1, -0.01), 0]}
-                    />
-                    <Tooltip content={<UnderwaterTooltip />} />
-                    <Area
-                      type="monotone"
-                      dataKey="drawdown"
-                      stroke="#ef4444"
-                      fill="url(#ddFill)"
-                      strokeWidth={1.5}
-                    />
-                  </AreaChart>
-                </ResponsiveContainer>
-              </div>
-            </>
-          )}
-        </div>
+                )}
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        </>
       )}
     </div>
   );
@@ -278,10 +282,9 @@ function ReturnsSection({
     <section className="mb-5">
       <div className="flex items-baseline justify-between gap-2 mb-3">
         <h3 className="text-sm font-semibold">報酬表現</h3>
-        <span className="text-xs text-muted">TWR · 時間加權</span>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 mb-4">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <HeroReturn
           label="累積報酬"
           value={total}
@@ -292,36 +295,44 @@ function ReturnsSection({
           value={ytd}
           sub={currentYear ? `${currentYear} 年${ytdStart ? ` · 起於 ${ytdStart}` : ''}` : undefined}
         />
+        <HeroReturn label="TWR 年化" value={annualized} sub="策略表現 · 排除資金進出" />
+        <HeroReturn label="XIRR 年化" value={xirr} sub="實際資金 · 納入金額與時點" />
       </div>
+      <p className="text-xs leading-5 text-muted mt-2.5 mb-4">
+        前三項為 TWR（時間加權），比較投資策略用；XIRR 檢視個人實際成果。兩者不同屬正常現象。
+      </p>
 
-      <BenchmarkComparison portfolioTotal={total} benchmark={benchmark} />
+      <BenchmarkComparison portfolioTotal={total} benchmark={benchmark} since={firstDate} />
       {years.length > 0 && <YearReturnsChart years={years} />}
-      <AnnualizedReturns twr={annualized} xirr={xirr} />
 
       <div className="border-t border-border mt-5" />
     </section>
   );
 }
 
+// 同一段時間（投組首筆紀錄至今）比較投組與 S&P 500，皆以台幣計（含匯率變動）
 function BenchmarkComparison({
   portfolioTotal,
   benchmark,
+  since,
 }: {
   portfolioTotal: number;
   benchmark?: BenchmarkSummary;
+  since?: string;
 }): ReactElement | null {
   if (!benchmark || benchmark.total === null) return null;
+  const beat = benchmark.excess === null || benchmark.excess >= 0;
   const values = [
-    { label: '投組 TWR', value: portfolioTotal },
-    { label: benchmark.name, value: benchmark.total },
-    { label: '超額報酬', value: benchmark.excess },
+    { label: '我的投組', value: portfolioTotal },
+    { label: `同期 ${benchmark.name}`, value: benchmark.total },
+    { label: beat ? '贏過大盤' : '落後大盤', value: benchmark.excess },
   ];
 
   return (
     <div className="border-y border-border py-3 mb-4">
       <div className="flex items-baseline justify-between gap-2 mb-2.5">
-        <h4 className="text-xs font-medium">同期基準比較</h4>
-        <span className="text-xs text-muted">累積 · TWD（含匯率）</span>
+        <h4 className="text-xs font-medium">跟大盤比</h4>
+        <span className="text-xs text-muted">{since ? `${since} 至今` : '同一段時間'} · 台幣計（含匯率）</span>
       </div>
       <div className="grid grid-cols-3 divide-x divide-border">
         {values.map(({ label, value }) => (
@@ -344,9 +355,13 @@ function BenchmarkComparison({
 function DrawdownHeader({
   summary,
   fallbackTrough,
+  benchmarkTrough,
+  toggle,
 }: {
   summary?: DrawdownSummary;
   fallbackTrough: number;
+  benchmarkTrough: number | null;
+  toggle: ReactElement | null;
 }): ReactElement {
   const trough = summary?.trough ?? fallbackTrough;
   const timing =
@@ -359,10 +374,14 @@ function DrawdownHeader({
         : null;
 
   return (
-    <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 mb-2">
-      <h3 className="text-sm font-semibold">最大回撤走勢</h3>
-      <p className="text-xs text-muted tabular-nums">
-        {trough < 0 ? `谷底 ${pct(trough)}${timing ? ` · ${timing}` : ''}` : timing}
+    <div className="mb-2">
+      <div className="flex items-center justify-between gap-3">
+        <h3 className="text-sm font-semibold">最大回撤走勢</h3>
+        {toggle}
+      </div>
+      <p className="mt-1 text-xs text-muted tabular-nums">
+        {trough < 0 ? `投組谷底 ${pct(trough)}${timing ? ` · ${timing}` : ''}` : timing}
+        {benchmarkTrough !== null && benchmarkTrough < 0 && ` ｜ S&P 500 谷底 ${pct(benchmarkTrough)}`}
       </p>
     </div>
   );
@@ -387,53 +406,6 @@ function HeroReturn({
         {pct(value, true)}
       </p>
       {sub && <p className="text-xs text-muted mt-1.5">{sub}</p>}
-    </div>
-  );
-}
-
-function AnnualizedReturns({ twr, xirr }: { twr: number | null; xirr: number | null }): ReactElement {
-  return (
-    <div className="border-t border-border mt-4 pt-4">
-      <div className="flex items-baseline justify-between gap-2 mb-3">
-        <h4 className="text-sm font-semibold">年化報酬率</h4>
-        <span className="text-xs text-muted">兩種口徑，各自保留</span>
-      </div>
-      <div className="grid grid-cols-2 gap-3">
-        <AnnualizedReturn
-          label="TWR 年化"
-          value={twr}
-          description="策略表現 · 排除資金進出"
-        />
-        <AnnualizedReturn
-          label="XIRR 年化"
-          value={xirr}
-          description="實際資金 · 納入金額與時點"
-        />
-      </div>
-      <p className="text-xs leading-5 text-muted mt-2.5">
-        比較投資策略看 TWR；檢視個人實際成果看 XIRR。兩者不同屬正常現象。
-      </p>
-    </div>
-  );
-}
-
-function AnnualizedReturn({
-  label,
-  value,
-  description,
-}: {
-  label: string;
-  value: number | null;
-  description: string;
-}): ReactElement {
-  const up = value !== null && value >= 0;
-  return (
-    <div className="min-w-0 rounded-lg border border-border bg-background p-3 sm:p-4">
-      <p className="text-xs text-muted mb-1">{label}</p>
-      <p className={`text-xl font-bold tabular-nums ${up ? 'text-up' : 'text-down'}`}>
-        {pct(value, true)}
-      </p>
-      <p className="text-xs leading-4 text-muted mt-1.5">{description}</p>
     </div>
   );
 }
@@ -466,7 +438,7 @@ function YearReturnsChart({ years }: { years: YearReturn[] }): ReactElement {
             <CartesianGrid strokeDasharray="3 3" stroke="#1f1f1f" vertical={false} />
             <XAxis
               dataKey="year"
-              stroke="#666"
+              stroke="#bdbdbd"
               fontSize={12}
               tickLine={false}
               axisLine={false}

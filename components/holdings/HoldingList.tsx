@@ -12,9 +12,10 @@ interface Props {
   onDelete: (holding: HoldingWithQuote) => void;
   onSell?: (holding: AggregatedHolding) => void;
   readOnly?: boolean;
+  weightedExpenseRatio?: number | null;
 }
 
-export default function HoldingList({ holdings, exchangeRate, totalValue, onEdit, onDelete, onSell, readOnly = false }: Props) {
+export default function HoldingList({ holdings, exchangeRate, totalValue, onEdit, onDelete, onSell, readOnly = false, weightedExpenseRatio = null }: Props) {
   const [expandedSymbols, setExpandedSymbols] = useState<Set<string>>(new Set());
 
   if (holdings.length === 0) {
@@ -89,12 +90,15 @@ export default function HoldingList({ holdings, exchangeRate, totalValue, onEdit
     );
   };
 
+  // 依 ETF 市值加權的平均費用率，放在費用率欄位上方
+  const weightedEr = weightedExpenseRatio !== null ? `${(weightedExpenseRatio * 100).toFixed(3)}%` : null;
+
   return (
     <div className="overflow-x-auto">
       {/* 桌面版表格 */}
       <table className="w-full hidden md:table">
         <thead>
-          <tr className="text-left text-muted text-sm border-b border-border">
+          <tr className="text-left text-muted text-sm border-b border-border [&>th]:align-bottom">
             <th className="pb-3 font-medium w-6"></th>
             <th className="pb-3 font-medium">代號</th>
             <th className="pb-3 font-medium text-right">股數</th>
@@ -104,7 +108,16 @@ export default function HoldingList({ holdings, exchangeRate, totalValue, onEdit
             <th className="pb-3 font-medium text-right">當前市值</th>
             <th className="pb-3 font-medium text-right">權重</th>
             <th className="pb-3 font-medium text-right">損益</th>
-            <th className="pb-3 font-medium text-right">費用率</th>
+            <th className="pb-3 font-medium text-right">
+              {weightedEr && (
+                <span className="mb-1.5 flex justify-end">
+                  <span className="whitespace-nowrap rounded-full bg-primary/15 px-3 py-1 text-sm font-semibold text-primary tabular-nums" title="ETF 加權費用率：依各 ETF 市值加權平均">
+                    加權 {weightedEr}
+                  </span>
+                </span>
+              )}
+              費用率
+            </th>
             <th className="pb-3 font-medium"></th>
           </tr>
         </thead>
@@ -270,6 +283,12 @@ export default function HoldingList({ holdings, exchangeRate, totalValue, onEdit
 
       {/* 手機版卡片 */}
       <div className="md:hidden space-y-3">
+        {weightedEr && (
+          <div className="flex min-h-12 items-center justify-between rounded-lg border border-border px-4">
+            <span className="text-muted">ETF 加權費用率</span>
+            <span className="text-lg font-semibold text-primary tabular-nums">{weightedEr}</span>
+          </div>
+        )}
         {sorted.map((holding) => {
           const currency = holding.market === 'US' ? 'USD' : 'TWD';
           const totalCost = Number(holding.shares) * Number(holding.cost_price);
@@ -287,11 +306,11 @@ export default function HoldingList({ holdings, exchangeRate, totalValue, onEdit
           return (
             <div key={holding.symbol} className="p-4 rounded-lg bg-card/50 border border-border">
               <div
-                className="flex items-start justify-between mb-3"
+                className="flex items-start justify-between gap-3 mb-3"
                 onClick={() => hasMultipleLots && toggleExpand(holding.symbol)}
               >
-                <div>
-                  <div className="flex items-center gap-2">
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-1.5 whitespace-nowrap">
                     {hasMultipleLots && (
                       isExpanded
                         ? <ChevronDown className="w-4 h-4 text-muted" />
@@ -317,7 +336,7 @@ export default function HoldingList({ holdings, exchangeRate, totalValue, onEdit
                     總成本: {formatCurrency(totalCost, currency)}
                   </p>
                 </div>
-                <div className={`text-right ${isPositive ? 'text-up' : 'text-down'}`}>
+                <div className={`shrink-0 text-right whitespace-nowrap ${isPositive ? 'text-up' : 'text-down'}`}>
                   {hasPrice ? (
                     <>
                       <div className="flex items-center justify-end gap-1">
@@ -326,7 +345,7 @@ export default function HoldingList({ holdings, exchangeRate, totalValue, onEdit
                       </div>
                       <p className="text-sm">{gainAbsStr}</p>
                       <p className="text-xs text-muted">
-                        當前市值: {formatCurrency(holding.currentValue || 0, 'TWD')}
+                        市值 {formatCurrency(holding.currentValue || 0, 'TWD')}
                       </p>
                     </>
                   ) : (
@@ -355,11 +374,11 @@ export default function HoldingList({ holdings, exchangeRate, totalValue, onEdit
                           </span>
                           {!readOnly && (
                             <>
-                              <button onClick={() => onEdit(lot)} className="p-1 rounded hover:bg-border" title="編輯">
-                                <Pencil className="w-3 h-3" />
+                              <button onClick={() => onEdit(lot)} className="inline-flex h-10 w-10 items-center justify-center rounded-lg hover:bg-border" title="編輯" aria-label="編輯批次">
+                                <Pencil className="w-4 h-4" />
                               </button>
-                              <button onClick={() => onDelete(lot)} className="p-1 rounded hover:bg-border text-danger" title="刪除">
-                                <Trash2 className="w-3 h-3" />
+                              <button onClick={() => onDelete(lot)} className="inline-flex h-10 w-10 items-center justify-center rounded-lg hover:bg-border text-danger" title="刪除" aria-label="刪除批次">
+                                <Trash2 className="w-4 h-4" />
                               </button>
                             </>
                           )}
@@ -375,7 +394,7 @@ export default function HoldingList({ holdings, exchangeRate, totalValue, onEdit
                 <div className="flex justify-end pt-2 mt-2 border-t border-border">
                   <button
                     onClick={() => onSell(holding)}
-                    className="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-yellow-500/40 text-yellow-500 hover:bg-yellow-500/10 transition-colors text-sm"
+                    className="flex min-h-11 items-center gap-1 px-4 rounded-lg border border-yellow-500/40 text-yellow-500 hover:bg-yellow-500/10 transition-colors text-sm"
                     title="賣出"
                   >
                     <ArrowRightLeft className="w-4 h-4" /> 賣出
@@ -386,23 +405,23 @@ export default function HoldingList({ holdings, exchangeRate, totalValue, onEdit
               {/* 單一 lot 操作按鈕 */}
               {!hasMultipleLots && (
                 <div className="flex items-center justify-between pt-2 border-t border-border">
-                  <div className="flex items-center gap-2 text-xs text-muted">
+                  <div className="flex flex-wrap items-center gap-x-2 text-xs text-muted">
                     {hasPrice && <span>現價: {formatPrice(holding.currentPrice!, currency)}</span>}
                     {holding.expenseRatio !== null && holding.expenseRatio !== undefined && (
                       <span>費用率: {(holding.expenseRatio * 100).toFixed(3)}%</span>
                     )}
                   </div>
                   {!readOnly && (
-                    <div className="flex items-center gap-2 ml-auto">
+                    <div className="flex items-center gap-1 ml-auto">
                       {onSell && (
-                        <button onClick={() => onSell(holding)} className="p-1.5 rounded hover:bg-border transition-colors text-yellow-500" title="賣出">
+                        <button onClick={() => onSell(holding)} className="inline-flex h-11 w-11 items-center justify-center rounded-lg hover:bg-border transition-colors text-yellow-500" title="賣出" aria-label="賣出">
                           <ArrowRightLeft className="w-4 h-4" />
                         </button>
                       )}
-                      <button onClick={() => onEdit(holding.lots[0])} className="p-1.5 rounded hover:bg-border transition-colors" title="編輯">
+                      <button onClick={() => onEdit(holding.lots[0])} className="inline-flex h-11 w-11 items-center justify-center rounded-lg hover:bg-border transition-colors" title="編輯" aria-label="編輯">
                         <Pencil className="w-4 h-4" />
                       </button>
-                      <button onClick={() => onDelete(holding.lots[0])} className="p-1.5 rounded hover:bg-border transition-colors text-danger" title="刪除">
+                      <button onClick={() => onDelete(holding.lots[0])} className="inline-flex h-11 w-11 items-center justify-center rounded-lg hover:bg-border transition-colors text-danger" title="刪除" aria-label="刪除">
                         <Trash2 className="w-4 h-4" />
                       </button>
                     </div>

@@ -23,14 +23,13 @@ interface ChartDataPoint {
 interface Props {
   portfolioId?: string | null;
   refreshKey?: number;
+  showBenchmark?: boolean;
 }
 
-export default function AssetTrendChart({ portfolioId, refreshKey }: Props) {
+export default function AssetTrendChart({ portfolioId, refreshKey, showBenchmark = true }: Props) {
   const [data, setData] = useState<ChartDataPoint[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  // S&P 500 對照線開關，預設開啟（功能目的即為對比大盤，使用者可隨時關閉）
-  const [showBenchmark, setShowBenchmark] = useState(true);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -84,7 +83,6 @@ export default function AssetTrendChart({ portfolioId, refreshKey }: Props) {
     label,
   }: {
     active?: boolean;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     payload?: Array<{ value: number; dataKey: string; color: string }>;
     label?: string;
   }) => {
@@ -111,7 +109,7 @@ export default function AssetTrendChart({ portfolioId, refreshKey }: Props) {
           <p className="font-semibold" style={{ color: '#3b82f6' }}>
             市值: NT$ {marketValue.toLocaleString('zh-TW')}
           </p>
-          <p className="text-sm" style={{ color: '#6b7280' }}>
+          <p className="text-sm text-muted">
             成本: NT$ {costBasis.toLocaleString('zh-TW')}
           </p>
           <p className={`text-sm font-medium mt-1 ${isPositive ? 'text-up' : 'text-down'}`}>
@@ -165,23 +163,6 @@ export default function AssetTrendChart({ portfolioId, refreshKey }: Props) {
 
   return (
     <div className="h-full flex flex-col">
-      {/* S&P 500 對照線開關 */}
-      <div className="mb-2 flex items-center gap-1">
-        <button
-          onClick={() => setShowBenchmark((v) => !v)}
-          className={`px-2.5 py-1 text-xs rounded-full font-medium transition-colors flex items-center gap-1.5 ${
-            showBenchmark
-              ? 'bg-primary text-white'
-              : 'bg-border/50 text-muted hover:text-foreground hover:bg-border'
-          }`}
-        >
-          <span
-            className="inline-block w-2.5 h-2.5 rounded-full"
-            style={{ backgroundColor: '#ffffff', opacity: showBenchmark ? 1 : 0.4 }}
-          />
-          S&amp;P 500 對照
-        </button>
-      </div>
       <div className="flex-1 min-h-0">
         <ResponsiveContainer width="100%" height="100%">
         <LineChart
@@ -192,14 +173,14 @@ export default function AssetTrendChart({ portfolioId, refreshKey }: Props) {
           <XAxis
             dataKey="date"
             tickFormatter={formatDate}
-            stroke="#666"
+            stroke="#bdbdbd"
             fontSize={12}
             tickLine={false}
             interval={Math.floor(data.length / 6)}
           />
           <YAxis
             tickFormatter={formatCurrency}
-            stroke="#666"
+            stroke="#bdbdbd"
             fontSize={12}
             tickLine={false}
             axisLine={false}
@@ -211,17 +192,17 @@ export default function AssetTrendChart({ portfolioId, refreshKey }: Props) {
             formatter={(value: string) =>
               value === 'value' ? '市值' : value === 'cost' ? '成本' : 'S&P 500'
             }
-            wrapperStyle={{ fontSize: 12, color: '#999' }}
+            wrapperStyle={{ fontSize: 12, color: '#c8c8c8' }}
           />
           {/* 成本線：灰色虛線 */}
           <Line
             type="monotone"
             dataKey="cost"
-            stroke="#6b7280"
+            stroke="#bdbdbd"
             strokeWidth={1.5}
             strokeDasharray="6 3"
             dot={false}
-            activeDot={{ r: 3, fill: '#6b7280' }}
+            activeDot={{ r: 3, fill: '#bdbdbd' }}
           />
           {/* S&P 500 對照線：白色實線 */}
           {showBenchmark && (

@@ -10,7 +10,7 @@
   --primary-foreground: #ffffff;
   --success: #22c55e;
   --danger: #ef4444;
-  --muted: #737373;
+  --muted: #c8c8c8;
 }
 
 @theme inline {
@@ -26,6 +26,9 @@
   --color-muted: var(--muted);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+  /* 小字放大到 13px，深色底上較易讀 */
+  --text-xs: 0.8125rem;
+  --text-xs--line-height: 1.25rem;
 }
 
 body {
@@ -87,4 +90,27 @@ textarea:focus {
 
 .text-down {
   color: var(--danger);
+}
+
+/* 隱藏數字輸入框的原生上下箭頭，改用專案樣式的步進鈕 */
+input.no-spinner::-webkit-outer-spin-button,
+input.no-spinner::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input.no-spinner {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+/* Recharts 點擊圖表或扇形時瀏覽器會畫出白色焦點框，圖表不需要 */
+.recharts-wrapper,
+.recharts-wrapper *:focus {
+  outline: none;
+}
+
+/* 文字反白：白色半透明，取代瀏覽器預設的藍色 */
+::selection {
+  background-color: rgb(255 255 255 / 0.28);
+  color: inherit;
 }

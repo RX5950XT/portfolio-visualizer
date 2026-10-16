@@ -1,13 +1,12 @@
 import { createServerClient } from '@/lib/supabase';
 import { scopeQuery, type Session } from '@/lib/auth';
 import { fetchMultipleQuotes, fetchExchangeRate } from '@/lib/stocks';
+import { z } from 'zod';
 
-interface HoldingRow {
-  symbol: string;
-  shares: number;
-  cost_price: number;
-  market: 'US' | 'TW';
-}
+const holdingSchema = z.object({
+  symbol: z.string().min(1), shares: z.coerce.number().positive(),
+  cost_price: z.coerce.number().nonnegative(), market: z.enum(['US', 'TW']),
+});
 
 export interface ContextHolding {
   symbol: string;
@@ -29,9 +28,10 @@ export interface PortfolioContext {
   totalGainTwd: number;
   totalGainPercent: number;
   exchangeRate: number;
+  exchangeRateEstimated: boolean;
 }
 
-// 組裝投資組合快照（同標的多批次合併），供 AI 顧問或洞察頁使用
+// MCP 與網站沿用相同的批次合併及台幣換算方式。
 export async function buildPortfolioContext(
   portfolioId: string | null,
   visibleIds: string[] | null,
@@ -62,11 +62,16 @@ export async function buildPortfolioContext(
     cashQuery = cashQuery.in('portfolio_id', visibleIds);
   }
 
-  const [{ data: holdings }, { data: cashRows }, exchangeRate] = await Promise.all([
+  const [holdingsResult, cashResult, liveRate] = await Promise.all([
     query,
     cashQuery,
-    fetchExchangeRate().then((r) => r ?? 32),
+    fetchExchangeRate(),
   ]);
+  if (holdingsResult.error || cashResult.error) throw new Error('讀取投資組合失敗');
+  const holdings = z.array(holdingSchema).parse(holdingsResult.data ?? []);
+  const cashRows = z.array(z.object({ amount_twd: z.coerce.number() })).parse(cashResult.data ?? []);
+  const exchangeRateEstimated = liveRate === null || !Number.isFinite(liveRate) || liveRate <= 0;
+  const exchangeRate = exchangeRateEstimated ? 32 : liveRate;
 
   const cashTwd = (cashRows ?? []).reduce(
     (sum: number, c: { amount_twd: number }) => sum + Number(c.amount_twd || 0),
@@ -74,12 +79,12 @@ export async function buildPortfolioContext(
   );
 
   if (!holdings || holdings.length === 0) {
-    return { ...emptyContext(), cashTwd, totalAssetsTwd: cashTwd, exchangeRate };
+    return { ...emptyContext(), cashTwd, totalAssetsTwd: cashTwd, exchangeRate, exchangeRateEstimated };
   }
 
   // 同標的多批次合併
   const bySymbol = new Map<string, { symbol: string; market: 'US' | 'TW'; shares: number; costOrig: number }>();
-  for (const lot of holdings as HoldingRow[]) {
+  for (const lot of holdings) {
     const agg = bySymbol.get(lot.symbol) ?? {
       symbol: lot.symbol,
       market: lot.market,
@@ -101,7 +106,8 @@ export async function buildPortfolioContext(
   for (const agg of bySymbol.values()) {
     const isUS = agg.market === 'US';
     const fx = isUS ? exchangeRate : 1;
-    const price = quotes.get(agg.symbol)?.regularMarketPrice ?? null;
+    const quotedPrice = quotes.get(agg.symbol)?.regularMarketPrice;
+    const price = typeof quotedPrice === 'number' && Number.isFinite(quotedPrice) && quotedPrice > 0 ? quotedPrice : null;
     const valueTwd = price ? agg.shares * price * fx : 0;
     const costTwd = agg.costOrig * fx;
     totalValueTwd += valueTwd;
@@ -136,6 +142,7 @@ export async function buildPortfolioContext(
     totalGainTwd: Math.round(totalGainTwd),
     totalGainPercent: totalCostTwd > 0 ? (totalGainTwd / totalCostTwd) * 100 : 0,
     exchangeRate,
+    exchangeRateEstimated,
   };
 }
 
@@ -149,5 +156,6 @@ function emptyContext(): PortfolioContext {
     totalGainTwd: 0,
     totalGainPercent: 0,
     exchangeRate: 32,
+    exchangeRateEstimated: true,
   };
 }

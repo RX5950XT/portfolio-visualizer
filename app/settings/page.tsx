@@ -7,26 +7,14 @@ import {
   Save,
   RefreshCw,
   Check,
-  KeyRound,
   Lock,
 } from 'lucide-react';
-
-interface AiSettings {
-  hasKey: boolean;
-  apiKeyMasked: string;
-  model: string;
-  systemPrompt: string;
-}
+import McpSettings from '@/components/McpSettings';
 
 interface AuthSettings {
   adminSource: 'db' | 'env';
   guestSource: 'db' | 'env' | 'none';
   demoEnabled: boolean;
-}
-
-interface ModelOption {
-  id: string;
-  name: string;
 }
 
 function sourceLabel(source: string): string {
@@ -38,22 +26,13 @@ function sourceLabel(source: string): string {
 export default function SettingsPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const [authSaving, setAuthSaving] = useState(false);
   const [authSaved, setAuthSaved] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
 
-  const [settings, setSettings] = useState<AiSettings | null>(null);
   const [authSettings, setAuthSettings] = useState<AuthSettings | null>(null);
-  const [models, setModels] = useState<ModelOption[]>([]);
-
-  const [apiKey, setApiKey] = useState('');
-  const [model, setModel] = useState('');
-  const [systemPrompt, setSystemPrompt] = useState('');
-
   const [currentPassword, setCurrentPassword] = useState('');
   const [newAdminPassword, setNewAdminPassword] = useState('');
   const [newGuestPassword, setNewGuestPassword] = useState('');
@@ -68,24 +47,9 @@ export default function SettingsPage() {
         return;
       }
 
-      const [settingsRes, modelsRes, authRes] = await Promise.all([
-        fetch('/api/settings'),
-        fetch('/api/ai/models'),
-        fetch('/api/settings/auth'),
-      ]);
-      const settingsJson = await settingsRes.json();
-      const modelsJson = await modelsRes.json();
+      const authRes = await fetch('/api/settings/auth');
       const authJson = await authRes.json();
-
-      if (settingsJson.data) {
-        const s = settingsJson.data as AiSettings;
-        setSettings(s);
-        setModel(s.model);
-        setSystemPrompt(s.systemPrompt);
-      }
-      if (Array.isArray(modelsJson.data)) {
-        setModels(modelsJson.data);
-      }
+      if (!authRes.ok) throw new Error(authJson.error || '載入設定失敗');
       if (authJson.data) {
         const a = authJson.data as AuthSettings;
         setAuthSettings(a);
@@ -101,35 +65,6 @@ export default function SettingsPage() {
   useEffect(() => {
     init();
   }, [init]);
-
-  const handleSave = async () => {
-    setSaving(true);
-    setError(null);
-    setSaved(false);
-    try {
-      const res = await fetch('/api/settings', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          apiKey: apiKey.trim() || undefined,
-          model,
-          systemPrompt,
-        }),
-      });
-      const json = await res.json();
-      if (!res.ok || json.error) {
-        throw new Error(json.error || '儲存失敗');
-      }
-      setApiKey('');
-      setSaved(true);
-      await init();
-      setTimeout(() => setSaved(false), 2000);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '儲存失敗');
-    } finally {
-      setSaving(false);
-    }
-  };
 
   const handleAuthSave = async () => {
     setAuthSaving(true);
@@ -238,12 +173,12 @@ export default function SettingsPage() {
           />
         </div>
 
-        <label className="flex items-center gap-2 text-sm cursor-pointer">
+        <label className="flex min-h-11 items-center gap-3 text-sm cursor-pointer">
           <input
             type="checkbox"
             checked={demoEnabled}
             onChange={(e) => setDemoEnabled(e.target.checked)}
-            className="rounded"
+            className="h-5 w-5 shrink-0 rounded accent-primary"
           />
           <span>啟用 Demo 空間（公開密碼 <code>demo</code>）</span>
         </label>
@@ -264,87 +199,8 @@ export default function SettingsPage() {
         </button>
       </div>
 
-      <div className="card space-y-5">
-        <div className="flex items-center gap-2 text-primary">
-          <KeyRound className="w-5 h-5" />
-          <h2 className="font-semibold">AI 顧問（OpenRouter）</h2>
-        </div>
-
-        <div>
-          <label className="block text-sm text-muted mb-1">
-            OpenRouter API Key
-          </label>
-          <input
-            type="password"
-            value={apiKey}
-            onChange={(e) => setApiKey(e.target.value)}
-            placeholder={
-              settings?.hasKey
-                ? `已設定（${settings.apiKeyMasked}），留空不變更`
-                : 'sk-or-...'
-            }
-            className="w-full"
-            autoComplete="off"
-          />
-          <p className="text-xs text-muted mt-1">
-            金鑰僅儲存於後端、永不顯示明文；於{' '}
-            <a
-              href="https://openrouter.ai/keys"
-              target="_blank"
-              rel="noreferrer"
-              className="text-primary hover:underline"
-            >
-              openrouter.ai/keys
-            </a>{' '}
-            取得。
-          </p>
-        </div>
-
-        <div>
-          <label className="block text-sm text-muted mb-1">模型名稱</label>
-          <input
-            type="text"
-            value={model}
-            onChange={(e) => setModel(e.target.value)}
-            list="model-suggestions"
-            placeholder="anthropic/claude-opus-4 或 openai/gpt-4o"
-            className="w-full"
-          />
-          <datalist id="model-suggestions">
-            {models.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.name}
-              </option>
-            ))}
-          </datalist>
-          <p className="text-xs text-muted mt-1">
-            可直接輸入任意 OpenRouter model id，下拉僅為建議。
-          </p>
-        </div>
-
-        <div>
-          <label className="block text-sm text-muted mb-1">
-            System Prompt（顧問口吻）
-          </label>
-          <textarea
-            value={systemPrompt}
-            onChange={(e) => setSystemPrompt(e.target.value)}
-            rows={5}
-            className="w-full resize-y"
-          />
-        </div>
-
-        {error && <p className="text-sm text-down">{error}</p>}
-
-        <button
-          onClick={handleSave}
-          disabled={saving}
-          className="btn-primary flex items-center gap-2 disabled:opacity-50"
-        >
-          {saved ? <Check className="w-4 h-4" /> : <Save className="w-4 h-4" />}
-          {saved ? '已儲存' : saving ? '儲存中…' : '儲存設定'}
-        </button>
-      </div>
+      {error && <p role="alert" className="text-sm text-down">{error}</p>}
+      <McpSettings />
     </div>
   );
 }

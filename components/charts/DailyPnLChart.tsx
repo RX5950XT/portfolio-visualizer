@@ -11,6 +11,7 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import { RefreshCw } from "lucide-react";
+import { dailyPnLDateRange, taipeiDate } from "@/lib/chart-period";
 
 interface DailyPnLPoint {
   date: string;
@@ -36,7 +37,11 @@ interface RoundedBarShapeProps {
   };
 }
 
-const DAY_OPTIONS = [30, 60, 90, 180] as const;
+const PERIOD_OPTIONS = [
+  { value: 30, label: '30日' }, { value: 60, label: '60日' },
+  { value: 90, label: '90日' }, { value: 180, label: '180日' },
+  { value: 'ytd', label: 'YTD' }, { value: 'year', label: '近一年' },
+] as const;
 
 // 依資料點數計算合適的 XAxis 刻度間隔，讓標籤數量維持在 6~8 個左右
 function xAxisInterval(count: number): number {
@@ -44,13 +49,12 @@ function xAxisInterval(count: number): number {
 }
 
 function toDateStr(d: Date): string {
-  return d.toISOString().split("T")[0];
+  return taipeiDate(d);
 }
 
 export default function DailyPnLChart({ portfolioId, refreshKey }: Props) {
   const [data, setData] = useState<DailyPnLPoint[]>([]);
-  const [days, setDays] = useState<number>(30);
-  const [mode, setMode] = useState<"preset" | "custom">("preset");
+  const [period, setPeriod] = useState<number | 'ytd' | 'year' | 'custom'>(30);
   const today = toDateStr(new Date());
   const [customStart, setCustomStart] = useState<string>(() => {
     const d = new Date();
@@ -61,9 +65,9 @@ export default function DailyPnLChart({ portfolioId, refreshKey }: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const isCustom = mode === "custom";
+  const isCustom = period === "custom";
 
-  const fetchData = useCallback(async () => {
+  const fetchData = useCallback(async (signal: AbortSignal) => {
     // 自訂區間不合法時不送請求，沿用現有資料
     if (isCustom && (!customStart || !customEnd || customStart > customEnd)) {
       return;
@@ -76,30 +80,35 @@ export default function DailyPnLChart({ portfolioId, refreshKey }: Props) {
       let url = `/api/charts/daily-pnl?_t=${timestamp}`;
       if (isCustom) {
         url += `&start=${customStart}&end=${customEnd}`;
-      } else {
-        url += `&days=${days}`;
+      } else if (typeof period === 'number') {
+        url += `&days=${period}`;
+      } else if (period === 'ytd' || period === 'year') {
+        url += `&${new URLSearchParams(dailyPnLDateRange(period))}`;
       }
       if (portfolioId) {
         url += `&portfolio_id=${portfolioId}`;
       }
-      const res = await fetch(url);
+      const res = await fetch(url, { signal });
       const { data: pnlData, error: apiError } = await res.json();
 
       if (apiError) {
         throw new Error(apiError);
       }
 
-      setData(pnlData || []);
+      if (!signal.aborted) setData(pnlData || []);
     } catch (err) {
+      if (signal.aborted) return;
       console.error("載入損益資料失敗:", err);
       setError("無法載入損益資料");
     } finally {
-      setLoading(false);
+      if (!signal.aborted) setLoading(false);
     }
-  }, [portfolioId, days, isCustom, customStart, customEnd]);
+  }, [portfolioId, period, isCustom, customStart, customEnd]);
 
   useEffect(() => {
-    fetchData();
+    const controller = new AbortController();
+    fetchData(controller.signal);
+    return () => controller.abort();
   }, [fetchData, refreshKey]);
 
   // 格式化金額
@@ -148,22 +157,24 @@ export default function DailyPnLChart({ portfolioId, refreshKey }: Props) {
   const daySelector = (
     <div className="mb-3">
       <div className="flex items-center gap-1 flex-wrap">
-        {DAY_OPTIONS.map((d) => (
+        {PERIOD_OPTIONS.map(({ value, label }) => (
           <button
-            key={d}
-            onClick={() => { setMode("preset"); setDays(d); }}
-            className={`px-2.5 py-1 text-xs rounded-full font-medium transition-colors ${
-              !isCustom && days === d
+            key={value}
+            onClick={() => setPeriod(value)}
+            aria-pressed={period === value}
+            className={`min-h-9 px-2.5 py-1 text-xs rounded-full font-medium transition-colors focus-visible:outline-2 focus-visible:outline-primary ${
+              period === value
                 ? "bg-primary text-white"
                 : "bg-border/50 text-muted hover:text-foreground hover:bg-border"
             }`}
           >
-            {d}日
+            {label}
           </button>
         ))}
         <button
-          onClick={() => setMode("custom")}
-          className={`px-2.5 py-1 text-xs rounded-full font-medium transition-colors ${
+          onClick={() => setPeriod("custom")}
+          aria-pressed={isCustom}
+          className={`min-h-9 px-2.5 py-1 text-xs rounded-full font-medium transition-colors focus-visible:outline-2 focus-visible:outline-primary ${
             isCustom
               ? "bg-primary text-white"
               : "bg-border/50 text-muted hover:text-foreground hover:bg-border"
@@ -173,7 +184,7 @@ export default function DailyPnLChart({ portfolioId, refreshKey }: Props) {
         </button>
       </div>
       {isCustom && (
-        <div className="flex items-center gap-2 mt-2 text-xs text-muted">
+        <div className="flex flex-wrap items-center gap-2 mt-2 text-xs text-muted">
           <input
             type="date"
             value={customStart}
@@ -238,7 +249,7 @@ export default function DailyPnLChart({ portfolioId, refreshKey }: Props) {
   return (
     <div className="h-full flex flex-col">
       {daySelector}
-      <div className="flex-1">
+      <div className="flex-1 min-h-0">
         <ResponsiveContainer width="100%" height="100%">
           <BarChart
             data={data}
@@ -252,14 +263,14 @@ export default function DailyPnLChart({ portfolioId, refreshKey }: Props) {
             <XAxis
               dataKey="date"
               tickFormatter={formatDate}
-              stroke="#666"
+              stroke="#bdbdbd"
               fontSize={12}
               tickLine={false}
               interval={xAxisInterval(data.length)}
             />
             <YAxis
               tickFormatter={formatCurrency}
-              stroke="#666"
+              stroke="#bdbdbd"
               fontSize={12}
               tickLine={false}
               axisLine={false}
