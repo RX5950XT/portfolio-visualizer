@@ -58,6 +58,8 @@ interface Metrics {
   returns?: PeriodReturns;
   benchmark?: BenchmarkSummary;
   drawdown?: DrawdownSummary;
+  windowStart?: string;
+  historyStart?: string;
   underwater: { date: string; drawdown: number; benchmark?: number | null }[];
 }
 
@@ -163,6 +165,8 @@ export default function MetricsPanel({ portfolioId, refreshKey }: Props): ReactE
             returns={data.returns}
             xirr={data.xirr}
             benchmark={data.benchmark}
+            historyStart={data.historyStart}
+            windowStart={data.windowStart}
           />
 
           <section className="mb-5">
@@ -267,10 +271,14 @@ function ReturnsSection({
   returns,
   xirr,
   benchmark,
+  historyStart,
+  windowStart,
 }: {
   returns?: PeriodReturns;
   xirr: number | null;
   benchmark?: BenchmarkSummary;
+  historyStart?: string;
+  windowStart?: string;
 }): ReactElement | null {
   if (!returns || returns.total === null) return null;
 
@@ -301,6 +309,9 @@ function ReturnsSection({
       </div>
       <p className="text-xs leading-5 text-muted mt-2.5 mb-4">
         前三項為 TWR（時間加權），比較投資策略用；XIRR 檢視個人實際成果。兩者不同屬正常現象。
+        {historyStart && windowStart && historyStart < windowStart
+          ? ` 更早的紀錄從 ${historyStart} 起，但中間曾空手超過 21 天，這頁百分比自 ${windowStart} 重新起算。交易紀錄沒有刪。`
+          : ''}
       </p>
 
       <BenchmarkComparison portfolioTotal={total} benchmark={benchmark} since={firstDate} />
@@ -311,7 +322,7 @@ function ReturnsSection({
   );
 }
 
-// 同一段時間（投組首筆紀錄至今）比較投組與 S&P 500，皆以台幣計（含匯率變動）
+// 跟大盤比的區間與績效頁相同：最後一次空手超過 21 天之後重新起算
 function BenchmarkComparison({
   portfolioTotal,
   benchmark,

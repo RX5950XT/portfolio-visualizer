@@ -223,6 +223,8 @@ export async function getMetrics(request: Request, session: Session) {
         excess: benchmarkExcessReturn(returns.total, benchmarkReturn),
       },
       drawdown: drawdownStats(dates, ddSeries),
+      windowStart: startDate,
+      historyStart: curve.dates[0] ?? startDate,
       underwater: dates.map((date, i) => ({
         date,
         drawdown: ddSeries[i],
