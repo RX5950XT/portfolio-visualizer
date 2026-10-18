@@ -237,7 +237,17 @@ const EMPTY_RETURNS: PeriodReturnSummary = {
   years: [],
 };
 
-// 買進當日若已賣出，getSharesAtDate 不會把當天賣出加回，成本現金流會漏記這段股數。
+// 空手超過這個天數，視為上一筆投資已經結束。績效從最後一次重新進場起算，
+// 避免幾千元的舊部位把整段年化、回撤和跟大盤的比較拉歪。
+export function indexAfterLastGap(dates: string[], maxGapDays = 21): number {
+  let start = 0;
+  const day = 86_400_000;
+  for (let i = 1; i < dates.length; i++) {
+    const gap = (Date.parse(dates[i]) - Date.parse(dates[i - 1])) / day;
+    if (gap > maxGapDays) start = i;
+  }
+  return start;
+}
 export function sharesAcquired(heldOnPurchaseDate: number, soldOnPurchaseDate: number): number {
   return heldOnPurchaseDate + soldOnPurchaseDate;
 }

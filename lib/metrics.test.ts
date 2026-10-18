@@ -6,6 +6,7 @@ import {
   drawdownSeries,
   drawdownStats,
   linkTwrIndex,
+  indexAfterLastGap,
   maxDrawdown,
   periodReturns,
   sharesAcquired,
@@ -138,5 +139,11 @@ describe('空手缺口的 TWR', () => {
   it('買進當日已賣出的股數要加回取得股數', () => {
     assert.equal(sharesAcquired(0, 16000), 16000);
     assert.equal(sharesAcquired(650, 350), 1000);
+  });
+
+  it('績效從最後一次空手重新進場起算', () => {
+    const dates = ['2024-06-13', '2024-11-11', '2025-12-08', '2025-12-09'];
+    assert.equal(indexAfterLastGap(dates), 2);
+    assert.equal(indexAfterLastGap(['2025-12-08', '2025-12-09', '2025-12-10']), 0);
   });
 });

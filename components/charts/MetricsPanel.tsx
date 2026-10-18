@@ -106,8 +106,9 @@ export default function MetricsPanel({ portfolioId, refreshKey }: Props): ReactE
   }, [fetchData, refreshKey]);
 
   const formatDate = (dateStr: string): string => {
-    const d = new Date(dateStr);
-    return `${d.getMonth() + 1}/${d.getDate()}`;
+    const [year, month, day] = dateStr.split('-');
+    const spansYears = (data?.underwater ?? []).some((point) => point.date.slice(0, 4) !== year);
+    return spansYears ? `${year.slice(2)}/${Number(month)}/${Number(day)}` : `${Number(month)}/${Number(day)}`;
   };
 
   // 自訂 Tooltip：確保回撤數字在深色背景清楚顯示

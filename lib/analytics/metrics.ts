@@ -16,6 +16,7 @@ import {
   periodReturns,
   linkTwrIndex,
   sharesAcquired,
+  indexAfterLastGap,
   type CashFlow,
 } from '@/lib/metrics';
 
@@ -138,6 +139,12 @@ export async function getMetrics(request: Request, session: Session) {
 
     if (curve.values.length < 2) return NextResponse.json({ data: null });
 
+    const windowStart = indexAfterLastGap(curve.dates);
+    const dates = curve.dates.slice(windowStart);
+    const values = curve.values.slice(windowStart);
+    const startDate = dates[0];
+    if (dates.length < 2) return NextResponse.json({ data: null });
+
     // 現金流：買入為流出、賣出為流入、期末市值為流入
     // 同時建立每日「淨注入」TWD 映射（+ 為投入、- 為提領），供 TWR 指數剝離買賣干擾
     const flows: CashFlow[] = [];
@@ -146,6 +153,16 @@ export async function getMetrics(request: Request, session: Session) {
       netInflowByDate.set(date, (netInflowByDate.get(date) ?? 0) + amount);
 
     for (const lot of holdings as EquityLot[]) {
+      const isUS = lot.market === 'US';
+      if (lot.purchase_date < startDate) {
+        const held = curve.getSharesAtDate(lot, startDate);
+        if (held <= 0) continue;
+        const fx = isUS ? curve.denseRateMap.get(startDate) ?? 32 : 1;
+        const cost = held * Number(lot.cost_price) * fx;
+        flows.push({ date: startDate, amount: -cost });
+        addInflow(startDate, cost);
+        continue;
+      }
       const soldSameDay = sellRows
         .filter((s) => s.holding_id === lot.id && s.transaction_date === lot.purchase_date)
         .reduce((sum, s) => sum + Number(s.shares), 0);
@@ -154,30 +171,29 @@ export async function getMetrics(request: Request, session: Session) {
         soldSameDay
       );
       if (originalShares <= 0) continue;
-      const isUS = lot.market === 'US';
       const fx = isUS ? curve.denseRateMap.get(lot.purchase_date) ?? 32 : 1;
       const cost = originalShares * Number(lot.cost_price) * fx;
       flows.push({ date: lot.purchase_date, amount: -cost });
       addInflow(lot.purchase_date, cost);
     }
     for (const s of sellRows) {
+      if (s.transaction_date < startDate) continue;
       const isUS = s.market === 'US';
       const fx = isUS ? curve.denseRateMap.get(s.transaction_date) ?? 32 : 1;
       const proceeds = Number(s.shares) * Number(s.price) * fx;
       flows.push({ date: s.transaction_date, amount: proceeds });
       addInflow(s.transaction_date, -proceeds);
     }
-    const currentValue = curve.values[curve.values.length - 1];
+    const currentValue = values[values.length - 1];
     flows.push({ date: new Date().toISOString().split('T')[0], amount: currentValue });
 
-    // TWR 指數：r[i] = (V[i] - flow) / V[i-1] - 1。flow 含前一觀察日之後到本日的淨注入，
-    // 因為權益曲線會略過空手日，賣出提領若不補進下一個觀察日，會被算成資產歸零。
-    const twrIndex = linkTwrIndex(curve.dates, curve.values, netInflowByDate);
+    const twrIndex = linkTwrIndex(dates, values, netInflowByDate);
 
     // 勝率：一次賣出動作為一筆決策。鍵與交易頁 groupSales 一致
     // （pro-rata 多 lot 同一 batch insert → created_at 相同 → 併為一筆；不同次賣出 created_at 不同 → 分開）
     const pnlByDecision = new Map<string, number>();
     for (const s of realizedSells) {
+      if (s.transaction_date < startDate) continue;
       const key = `${s.transaction_date}|${s.symbol}|${s.market}|${s.price}|${s.created_at}`;
       pnlByDecision.set(key, (pnlByDecision.get(key) ?? 0) + Number(s.realized_pnl_twd ?? 0));
     }
@@ -185,14 +201,13 @@ export async function getMetrics(request: Request, session: Session) {
     const vol = annualizedVolatility(twrIndex);
     const annualReturn = xirr(flows);
     const ddSeries = drawdownSeries(twrIndex);
-    const returns = periodReturns(curve.dates, twrIndex);
+    const returns = periodReturns(dates, twrIndex);
     const benchmarkValues = buildBenchmarkValues(
       benchmarkHistory,
-      curve.dates,
+      dates,
       curve.denseRateMap
     );
-    const benchmarkReturn = periodReturns(curve.dates, benchmarkValues).total;
-    // S&P 500 同期回撤（TWD 含匯率），供回撤圖對照
+    const benchmarkReturn = periodReturns(dates, benchmarkValues).total;
     const benchmarkDd = benchmarkValues.length ? drawdownSeries(benchmarkValues) : null;
 
     const data = {
@@ -201,15 +216,14 @@ export async function getMetrics(request: Request, session: Session) {
       sharpe: sharpeRatio(twrIndex, RISK_FREE),
       sortino: sortinoRatio(twrIndex, RISK_FREE),
       winRate: winRate([...pnlByDecision.values()]),
-      // 期間報酬率（TWR 累積）：Total / YTD / 各曆年，複用同一條 twrIndex
       returns,
       benchmark: {
         name: 'S&P 500',
         total: benchmarkReturn,
         excess: benchmarkExcessReturn(returns.total, benchmarkReturn),
       },
-      drawdown: drawdownStats(curve.dates, ddSeries),
-      underwater: curve.dates.map((date, i) => ({
+      drawdown: drawdownStats(dates, ddSeries),
+      underwater: dates.map((date, i) => ({
         date,
         drawdown: ddSeries[i],
         benchmark: benchmarkDd ? benchmarkDd[i] : null,
