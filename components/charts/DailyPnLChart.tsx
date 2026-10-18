@@ -122,8 +122,9 @@ export default function DailyPnLChart({ portfolioId, refreshKey }: Props) {
 
   // 格式化日期
   const formatDate = (dateStr: string) => {
-    const date = new Date(dateStr);
-    return `${date.getMonth() + 1}/${date.getDate()}`;
+    const [year, month, day] = dateStr.split('-');
+    const spansYears = data.some((point) => point.date.slice(0, 4) !== year);
+    return spansYears ? `${year.slice(2)}/${Number(month)}/${Number(day)}` : `${Number(month)}/${Number(day)}`;
   };
 
   // 自訂 Tooltip
