@@ -237,6 +237,37 @@ const EMPTY_RETURNS: PeriodReturnSummary = {
   years: [],
 };
 
+// 買進當日若已賣出，getSharesAtDate 不會把當天賣出加回，成本現金流會漏記這段股數。
+export function sharesAcquired(heldOnPurchaseDate: number, soldOnPurchaseDate: number): number {
+  return heldOnPurchaseDate + soldOnPurchaseDate;
+}
+
+// 權益曲線會跳過空手日。只取曲線當日的現金流，會把落在缺口裡的賣出提領弄丟，
+// 下一筆買進就被當成前一段市值歸零。這裡把 (前一觀察日, 本觀察日] 的淨注入一次計入。
+export function linkTwrIndex(
+  dates: string[],
+  values: number[],
+  netInflowByDate: Map<string, number>
+): number[] {
+  const index = new Array<number>(values.length);
+  if (values.length === 0) return index;
+  index[0] = 1;
+  for (let i = 1; i < values.length; i++) {
+    const prev = values[i - 1];
+    let flow = 0;
+    for (const [date, amount] of netInflowByDate) {
+      if (date > dates[i - 1] && date <= dates[i]) flow += amount;
+    }
+    if (prev > 0) {
+      const r = (values[i] - flow) / prev - 1;
+      index[i] = index[i - 1] * (1 + r);
+    } else {
+      index[i] = index[i - 1];
+    }
+  }
+  return index;
+}
+
 // 期間報酬率：吃 route 已算好的 TWR 指數（index[0]=1、剝離買賣現金流），只做期間切分。
 // 各年報酬 = 該年最後一日 index ÷「前一日 index」− 1；首年基準為 index[0]（起始資本）。
 // 因每年基準取緊鄰前一日，各年 (1+r) 連乘會 telescoping 為 (1 + total)，數字自洽。

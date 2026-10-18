@@ -14,6 +14,8 @@ import {
   xirr,
   winRate,
   periodReturns,
+  linkTwrIndex,
+  sharesAcquired,
   type CashFlow,
 } from '@/lib/metrics';
 
@@ -144,7 +146,13 @@ export async function getMetrics(request: Request, session: Session) {
       netInflowByDate.set(date, (netInflowByDate.get(date) ?? 0) + amount);
 
     for (const lot of holdings as EquityLot[]) {
-      const originalShares = curve.getSharesAtDate(lot, lot.purchase_date);
+      const soldSameDay = sellRows
+        .filter((s) => s.holding_id === lot.id && s.transaction_date === lot.purchase_date)
+        .reduce((sum, s) => sum + Number(s.shares), 0);
+      const originalShares = sharesAcquired(
+        curve.getSharesAtDate(lot, lot.purchase_date),
+        soldSameDay
+      );
       if (originalShares <= 0) continue;
       const isUS = lot.market === 'US';
       const fx = isUS ? curve.denseRateMap.get(lot.purchase_date) ?? 32 : 1;
@@ -162,21 +170,9 @@ export async function getMetrics(request: Request, session: Session) {
     const currentValue = curve.values[curve.values.length - 1];
     flows.push({ date: new Date().toISOString().split('T')[0], amount: currentValue });
 
-    // TWR 指數：r[i] = (V[i] - flow[i]) / V[i-1] - 1；以此為基準算回撤/波動率，
-    // 避免賣出造成的市值掉落被誤判為「跌幅」、買入抬高峰值。
-    // 第 0 日視為起始資本（index = 1），不貢獻報酬。
-    const twrIndex: number[] = new Array(curve.values.length);
-    twrIndex[0] = 1;
-    for (let i = 1; i < curve.values.length; i++) {
-      const prev = curve.values[i - 1];
-      const flow = netInflowByDate.get(curve.dates[i]) ?? 0;
-      if (prev > 0) {
-        const r = (curve.values[i] - flow) / prev - 1;
-        twrIndex[i] = twrIndex[i - 1] * (1 + r);
-      } else {
-        twrIndex[i] = twrIndex[i - 1];
-      }
-    }
+    // TWR 指數：r[i] = (V[i] - flow) / V[i-1] - 1。flow 含前一觀察日之後到本日的淨注入，
+    // 因為權益曲線會略過空手日，賣出提領若不補進下一個觀察日，會被算成資產歸零。
+    const twrIndex = linkTwrIndex(curve.dates, curve.values, netInflowByDate);
 
     // 勝率：一次賣出動作為一筆決策。鍵與交易頁 groupSales 一致
     // （pro-rata 多 lot 同一 batch insert → created_at 相同 → 併為一筆；不同次賣出 created_at 不同 → 分開）

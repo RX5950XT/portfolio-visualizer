@@ -5,8 +5,10 @@ import {
   benchmarkExcessReturn,
   drawdownSeries,
   drawdownStats,
+  linkTwrIndex,
   maxDrawdown,
   periodReturns,
+  sharesAcquired,
   sharpeRatio,
   sortinoRatio,
   winRate,
@@ -114,5 +116,27 @@ describe('既有績效函式', () => {
   it('拒絕無效期間資料', () => {
     assert.equal(periodReturns([], []).total, null);
     assert.equal(periodReturns(['2026-01-01', '2026-01-02'], [0, 1]).total, null);
+  });
+});
+
+describe('空手缺口的 TWR', () => {
+  it('把落在兩個觀察日之間的賣出提領算進下一日，而不是當成資產歸零', () => {
+    const flows = new Map<string, number>([
+      ['2024-11-11', -11381],
+      ['2024-12-10', 1148],
+    ]);
+    const index = linkTwrIndex(['2024-11-10', '2024-12-10'], [11000, 1200], flows);
+    closeTo(index[1], (1200 - (1148 - 11381)) / 11000, 1e-9);
+  });
+
+  it('同一觀察日的買賣仍只計當日淨注入', () => {
+    const flows = new Map<string, number>([['2026-01-16', 573]]);
+    const index = linkTwrIndex(['2026-01-15', '2026-01-16'], [300000, 300000], flows);
+    closeTo(index[1], (300000 - 573) / 300000, 1e-9);
+  });
+
+  it('買進當日已賣出的股數要加回取得股數', () => {
+    assert.equal(sharesAcquired(0, 16000), 16000);
+    assert.equal(sharesAcquired(650, 350), 1000);
   });
 });
