@@ -210,6 +210,46 @@ export async function getMetrics(request: Request, session: Session) {
     const benchmarkReturn = periodReturns(dates, benchmarkValues).total;
     const benchmarkDd = benchmarkValues.length ? drawdownSeries(benchmarkValues) : null;
 
+    const summarizePrior = () => {
+      const priorDates = curve.dates.slice(0, windowStart);
+      const priorValues = curve.values.slice(0, windowStart);
+      if (priorDates.length < 2) return null;
+      const priorFlows = new Map<string, number>();
+      const addPrior = (date: string, amount: number) =>
+        priorFlows.set(date, (priorFlows.get(date) ?? 0) + amount);
+      for (const lot of holdings as EquityLot[]) {
+        if (lot.purchase_date >= startDate) continue;
+        const soldSameDay = sellRows
+          .filter((s) => s.holding_id === lot.id && s.transaction_date === lot.purchase_date)
+          .reduce((sum, s) => sum + Number(s.shares), 0);
+        const originalShares = sharesAcquired(
+          curve.getSharesAtDate(lot, lot.purchase_date),
+          soldSameDay
+        );
+        if (originalShares <= 0) continue;
+        const fx = lot.market === 'US' ? curve.denseRateMap.get(lot.purchase_date) ?? 32 : 1;
+        addPrior(lot.purchase_date, originalShares * Number(lot.cost_price) * fx);
+      }
+      for (const s of sellRows) {
+        if (s.transaction_date >= startDate) continue;
+        const fx = s.market === 'US' ? curve.denseRateMap.get(s.transaction_date) ?? 32 : 1;
+        addPrior(s.transaction_date, -Number(s.shares) * Number(s.price) * fx);
+      }
+      const priorIndex = linkTwrIndex(priorDates, priorValues, priorFlows);
+      const priorReturns = periodReturns(priorDates, priorIndex);
+      const priorDrawdown = drawdownStats(priorDates, drawdownSeries(priorIndex));
+      const realizedPnlTwd = realizedSells
+        .filter((s) => s.transaction_date < startDate)
+        .reduce((sum, s) => sum + Number(s.realized_pnl_twd ?? 0), 0);
+      return {
+        start: priorDates[0],
+        end: priorDates[priorDates.length - 1],
+        total: priorReturns.total,
+        drawdown: priorDrawdown.trough,
+        realizedPnlTwd: Math.round(realizedPnlTwd),
+      };
+    };
+
     const data = {
       xirr: annualReturn,
       volatility: vol,
@@ -225,6 +265,7 @@ export async function getMetrics(request: Request, session: Session) {
       drawdown: drawdownStats(dates, ddSeries),
       windowStart: startDate,
       historyStart: curve.dates[0] ?? startDate,
+      prior: windowStart >= 2 ? summarizePrior() : null,
       underwater: dates.map((date, i) => ({
         date,
         drawdown: ddSeries[i],

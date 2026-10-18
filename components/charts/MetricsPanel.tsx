@@ -49,6 +49,14 @@ interface DrawdownSummary {
   recovered: boolean;
 }
 
+interface PriorPeriod {
+  start: string;
+  end: string;
+  total: number | null;
+  drawdown: number;
+  realizedPnlTwd: number;
+}
+
 interface Metrics {
   xirr: number | null;
   volatility: number;
@@ -60,6 +68,7 @@ interface Metrics {
   drawdown?: DrawdownSummary;
   windowStart?: string;
   historyStart?: string;
+  prior?: PriorPeriod | null;
   underwater: { date: string; drawdown: number; benchmark?: number | null }[];
 }
 
@@ -167,6 +176,7 @@ export default function MetricsPanel({ portfolioId, refreshKey }: Props): ReactE
             benchmark={data.benchmark}
             historyStart={data.historyStart}
             windowStart={data.windowStart}
+            prior={data.prior}
           />
 
           <section className="mb-5">
@@ -273,12 +283,14 @@ function ReturnsSection({
   benchmark,
   historyStart,
   windowStart,
+  prior,
 }: {
   returns?: PeriodReturns;
   xirr: number | null;
   benchmark?: BenchmarkSummary;
   historyStart?: string;
   windowStart?: string;
+  prior?: PriorPeriod | null;
 }): ReactElement | null {
   if (!returns || returns.total === null) return null;
 
@@ -309,9 +321,11 @@ function ReturnsSection({
       </div>
       <p className="text-xs leading-5 text-muted mt-2.5 mb-4">
         前三項為 TWR（時間加權），比較投資策略用；XIRR 檢視個人實際成果。兩者不同屬正常現象。
-        {historyStart && windowStart && historyStart < windowStart
-          ? ` 更早的紀錄從 ${historyStart} 起，但中間曾空手超過 21 天，這頁百分比自 ${windowStart} 重新起算。交易紀錄沒有刪。`
-          : ''}
+        {prior
+          ? ` 更早的已結清部位 ${prior.start}～${prior.end} 分開算：持有期間 ${pct(prior.total, true)}，最大回撤 ${pct(prior.drawdown)}，落袋 ${prior.realizedPnlTwd.toLocaleString('zh-TW')} 元。金額和現在這本不同，所以不併進上面的百分比。`
+          : historyStart && windowStart && historyStart < windowStart
+            ? ` 更早的紀錄從 ${historyStart} 起，但中間曾空手超過 21 天，這頁百分比自 ${windowStart} 重新起算。交易紀錄沒有刪。`
+            : ''}
       </p>
 
       <BenchmarkComparison portfolioTotal={total} benchmark={benchmark} since={firstDate} />

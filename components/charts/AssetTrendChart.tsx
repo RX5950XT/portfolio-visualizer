@@ -15,9 +15,9 @@ import { RefreshCw } from 'lucide-react';
 
 interface ChartDataPoint {
   date: string;
-  value: number;
-  cost: number;
-  benchmark: number;
+  value: number | null;
+  cost: number | null;
+  benchmark: number | null;
 }
 
 interface Props {
@@ -152,10 +152,18 @@ export default function AssetTrendChart({ portfolioId, refreshKey, showBenchmark
     );
   }
 
+  const chartData = data.flatMap((point, index) => {
+    if (index === 0) return [point];
+    const gapDays = (Date.parse(point.date) - Date.parse(data[index - 1].date)) / 86_400_000;
+    if (gapDays <= 21) return [point];
+    const gapDate = new Date(Date.parse(data[index - 1].date) + 86_400_000).toISOString().slice(0, 10);
+    return [{ date: gapDate, value: null, cost: null, benchmark: null }, point];
+  });
+
   // Y 軸範圍：取顯示中各線的聯合 min/max（白線開啟時納入 benchmark）
-  const allValues = data.flatMap((d) =>
-    showBenchmark ? [d.value, d.cost, d.benchmark] : [d.value, d.cost]
-  );
+  const allValues = chartData.flatMap((d) =>
+    (showBenchmark ? [d.value, d.cost, d.benchmark] : [d.value, d.cost])
+  ).filter((value): value is number => value !== null);
   const minValue = Math.min(...allValues);
   const maxValue = Math.max(...allValues);
   const padding = (maxValue - minValue) * 0.1 || maxValue * 0.1;
@@ -167,7 +175,7 @@ export default function AssetTrendChart({ portfolioId, refreshKey, showBenchmark
       <div className="flex-1 min-h-0">
         <ResponsiveContainer width="100%" height="100%">
         <LineChart
-          data={data}
+          data={chartData}
           margin={{ top: 5, right: 20, left: 10, bottom: 5 }}
         >
           <CartesianGrid strokeDasharray="3 3" stroke="#333" vertical={false} />
@@ -223,6 +231,7 @@ export default function AssetTrendChart({ portfolioId, refreshKey, showBenchmark
             stroke="#3b82f6"
             strokeWidth={2}
             dot={false}
+            connectNulls={false}
             activeDot={{ r: 4, fill: '#3b82f6' }}
           />
         </LineChart>
