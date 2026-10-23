@@ -7,6 +7,9 @@ export interface CashFlow {
 
 const MS_PER_YEAR = 365 * 24 * 3600 * 1000;
 const MS_PER_DAY = 24 * 3600 * 1000;
+// 權益曲線逐「日曆日」取樣（週末沿用前一收盤），年化必須用 365 而非交易日 252，
+// 否則波動率與 Sharpe/Sortino 會被低估約 17%。
+const PERIODS_PER_YEAR = 365;
 
 // 日報酬序列（跳過前一日為 0 的情況）
 function dailyReturns(values: number[]): number[] {
@@ -40,13 +43,13 @@ export function drawdownSeries(values: number[]): number[] {
   });
 }
 
-// 年化波動率（日報酬標準差 × √252）
+// 年化波動率（日報酬標準差 × √365）
 export function annualizedVolatility(values: number[]): number {
   const rets = dailyReturns(values);
   if (rets.length < 2) return 0;
   const mean = rets.reduce((a, b) => a + b, 0) / rets.length;
   const variance = rets.reduce((a, b) => a + (b - mean) ** 2, 0) / (rets.length - 1);
-  return Math.sqrt(variance) * Math.sqrt(252);
+  return Math.sqrt(variance) * Math.sqrt(PERIODS_PER_YEAR);
 }
 
 // Sharpe 的報酬與波動都必須源自同一條 TWR 日報酬序列，避免混入資金時點影響。
@@ -59,8 +62,8 @@ export function sharpeRatio(values: number[], annualRiskFreeRate: number): numbe
   const standardDeviation = Math.sqrt(variance);
   if (standardDeviation === 0) return null;
 
-  const dailyRiskFreeRate = Math.pow(1 + annualRiskFreeRate, 1 / 252) - 1;
-  return ((mean - dailyRiskFreeRate) / standardDeviation) * Math.sqrt(252);
+  const dailyRiskFreeRate = Math.pow(1 + annualRiskFreeRate, 1 / PERIODS_PER_YEAR) - 1;
+  return ((mean - dailyRiskFreeRate) / standardDeviation) * Math.sqrt(PERIODS_PER_YEAR);
 }
 
 // Sortino 只將低於目標報酬的日報酬視為風險，避免上漲波動拉低分數。
@@ -68,7 +71,7 @@ export function sortinoRatio(values: number[], annualTargetRate: number): number
   const rets = dailyReturns(values);
   if (rets.length < 2 || annualTargetRate <= -1) return null;
 
-  const dailyTargetRate = Math.pow(1 + annualTargetRate, 1 / 252) - 1;
+  const dailyTargetRate = Math.pow(1 + annualTargetRate, 1 / PERIODS_PER_YEAR) - 1;
   const mean = rets.reduce((sum, value) => sum + value, 0) / rets.length;
   const downsideVariance =
     rets.reduce((sum, value) => sum + Math.min(0, value - dailyTargetRate) ** 2, 0) /
@@ -76,7 +79,7 @@ export function sortinoRatio(values: number[], annualTargetRate: number): number
   const downsideDeviation = Math.sqrt(downsideVariance);
   if (downsideDeviation === 0) return null;
 
-  return ((mean - dailyTargetRate) / downsideDeviation) * Math.sqrt(252);
+  return ((mean - dailyTargetRate) / downsideDeviation) * Math.sqrt(PERIODS_PER_YEAR);
 }
 
 export function benchmarkExcessReturn(
@@ -226,7 +229,7 @@ export interface YearReturn {
 export interface PeriodReturnSummary {
   total: number | null; // 自成立以來累積
   ytd: number | null; // 今年至今累積（等於最後一個曆年的累積）
-  annualized: number | null; // 自成立以來 TWR 年化
+  annualized: number | null; // 自成立以來 TWR 年化；未滿一年為 null
   years: YearReturn[]; // 各曆年累積，年份遞增
 }
 
@@ -252,28 +255,55 @@ export function sharesAcquired(heldOnPurchaseDate: number, soldOnPurchaseDate: n
   return heldOnPurchaseDate + soldOnPurchaseDate;
 }
 
-// 權益曲線會跳過空手日。只取曲線當日的現金流，會把落在缺口裡的賣出提領弄丟，
-// 下一筆買進就被當成前一段市值歸零。這裡把 (前一觀察日, 本觀察日] 的淨注入一次計入。
+// 單日現金流（TWD，皆為正數）：買進投入、賣出取回
+export interface DayFlow {
+  buy: number;
+  sell: number;
+}
+
+export function addDayFlow(
+  flows: Map<string, DayFlow>,
+  date: string,
+  buy: number,
+  sell: number
+): void {
+  const prev = flows.get(date) ?? { buy: 0, sell: 0 };
+  flows.set(date, { buy: prev.buy + buy, sell: prev.sell + sell });
+}
+
+// 一段期間的成長倍數：買進視為期初投入、賣出視為期末取回。
+// Why: 分母含當日投入，小部位遇上大筆加碼時，成交價與收盤價的小差距不會被放大成暴漲暴跌；
+//      期初為 0（空手後重新進場）也能正確算出當日報酬。
+function periodGrowth(start: number, end: number, flow?: DayFlow): number {
+  const base = start + (flow?.buy ?? 0);
+  return base > 0 ? (end + (flow?.sell ?? 0)) / base : 1;
+}
+
+// 每日連乘的 TWR 指數；index[0] 為首日收盤相對投入成本的成長（起點基準 1 在首日之前）。
+// 權益曲線省略空手日，落在兩觀察日之間的現金流日必為市值 0 的日子：
+// 逐日切開（賣光那天結算、重新買進那天從 0 起算）再連乘，不把兩段混成一筆。
 export function linkTwrIndex(
   dates: string[],
   values: number[],
-  netInflowByDate: Map<string, number>
+  flows: Map<string, DayFlow>
 ): number[] {
   const index = new Array<number>(values.length);
   if (values.length === 0) return index;
-  index[0] = 1;
+  const flowDates = [...flows.keys()].sort();
+  let k = 0;
+  while (k < flowDates.length && flowDates[k] < dates[0]) k++;
+  const firstDay = flowDates[k] === dates[0] ? flows.get(flowDates[k++]) : undefined;
+
+  index[0] = periodGrowth(0, values[0], firstDay);
   for (let i = 1; i < values.length; i++) {
-    const prev = values[i - 1];
-    let flow = 0;
-    for (const [date, amount] of netInflowByDate) {
-      if (date > dates[i - 1] && date <= dates[i]) flow += amount;
+    let growth = 1;
+    let start = values[i - 1];
+    while (k < flowDates.length && flowDates[k] < dates[i]) {
+      growth *= periodGrowth(start, 0, flows.get(flowDates[k++]));
+      start = 0;
     }
-    if (prev > 0) {
-      const r = (values[i] - flow) / prev - 1;
-      index[i] = index[i - 1] * (1 + r);
-    } else {
-      index[i] = index[i - 1];
-    }
+    const today = flowDates[k] === dates[i] ? flows.get(flowDates[k++]) : undefined;
+    index[i] = index[i - 1] * growth * periodGrowth(start, values[i], today);
   }
   return index;
 }
@@ -314,8 +344,9 @@ export function periodReturns(dates: string[], index: number[]): PeriodReturnSum
   const elapsedMs = new Date(dates[dates.length - 1]).getTime() - new Date(dates[0]).getTime();
   const elapsedYears = elapsedMs / MS_PER_YEAR;
   const growth = lastIndex / startIndex;
+  // 未滿一年不年化（GIPS）：短期報酬外推一年會被放大成誇張數字
   const annualized =
-    elapsedYears > 0 && growth > 0 ? Math.pow(growth, 1 / elapsedYears) - 1 : null;
+    elapsedYears >= 1 && growth > 0 ? Math.pow(growth, 1 / elapsedYears) - 1 : null;
 
   return {
     total: growth - 1,

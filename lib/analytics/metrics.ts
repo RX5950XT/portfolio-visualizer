@@ -15,9 +15,11 @@ import {
   winRate,
   periodReturns,
   linkTwrIndex,
+  addDayFlow,
   sharesAcquired,
   indexAfterLastGap,
   type CashFlow,
+  type DayFlow,
 } from '@/lib/metrics';
 
 // 無風險利率（年化）：台美折衷，用於 Sharpe；可日後移入設定
@@ -146,11 +148,9 @@ export async function getMetrics(request: Request, session: Session) {
     if (dates.length < 2) return NextResponse.json({ data: null });
 
     // 現金流：買入為流出、賣出為流入、期末市值為流入
-    // 同時建立每日「淨注入」TWD 映射（+ 為投入、- 為提領），供 TWR 指數剝離買賣干擾
+    // 同時建立每日買進／賣出 TWD 映射，供 TWR 指數剝離買賣干擾
     const flows: CashFlow[] = [];
-    const netInflowByDate = new Map<string, number>();
-    const addInflow = (date: string, amount: number) =>
-      netInflowByDate.set(date, (netInflowByDate.get(date) ?? 0) + amount);
+    const dayFlows = new Map<string, DayFlow>();
 
     for (const lot of holdings as EquityLot[]) {
       const isUS = lot.market === 'US';
@@ -160,7 +160,7 @@ export async function getMetrics(request: Request, session: Session) {
         const fx = isUS ? curve.denseRateMap.get(startDate) ?? 32 : 1;
         const cost = held * Number(lot.cost_price) * fx;
         flows.push({ date: startDate, amount: -cost });
-        addInflow(startDate, cost);
+        addDayFlow(dayFlows, startDate, cost, 0);
         continue;
       }
       const soldSameDay = sellRows
@@ -174,7 +174,7 @@ export async function getMetrics(request: Request, session: Session) {
       const fx = isUS ? curve.denseRateMap.get(lot.purchase_date) ?? 32 : 1;
       const cost = originalShares * Number(lot.cost_price) * fx;
       flows.push({ date: lot.purchase_date, amount: -cost });
-      addInflow(lot.purchase_date, cost);
+      addDayFlow(dayFlows, lot.purchase_date, cost, 0);
     }
     for (const s of sellRows) {
       if (s.transaction_date < startDate) continue;
@@ -182,12 +182,12 @@ export async function getMetrics(request: Request, session: Session) {
       const fx = isUS ? curve.denseRateMap.get(s.transaction_date) ?? 32 : 1;
       const proceeds = Number(s.shares) * Number(s.price) * fx;
       flows.push({ date: s.transaction_date, amount: proceeds });
-      addInflow(s.transaction_date, -proceeds);
+      addDayFlow(dayFlows, s.transaction_date, 0, proceeds);
     }
     const currentValue = values[values.length - 1];
     flows.push({ date: new Date().toISOString().split('T')[0], amount: currentValue });
 
-    const twrIndex = linkTwrIndex(dates, values, netInflowByDate);
+    const twrIndex = linkTwrIndex(dates, values, dayFlows);
 
     // 勝率：一次賣出動作為一筆決策。鍵與交易頁 groupSales 一致
     // （pro-rata 多 lot 同一 batch insert → created_at 相同 → 併為一筆；不同次賣出 created_at 不同 → 分開）
@@ -199,9 +199,11 @@ export async function getMetrics(request: Request, session: Session) {
     }
 
     const vol = annualizedVolatility(twrIndex);
-    const annualReturn = xirr(flows);
+    // 前置基準 1：買進當日成交價→收盤的漲跌也算進報酬（只買不賣時累積 = 市值 ÷ 成本 − 1）
+    const returns = periodReturns([dates[0], ...dates], [1, ...twrIndex]);
+    // XIRR 本質是年化；與 TWR 同一口徑，未滿一年不外推
+    const annualReturn = returns.annualized === null ? null : xirr(flows);
     const ddSeries = drawdownSeries(twrIndex);
-    const returns = periodReturns(dates, twrIndex);
     const benchmarkValues = buildBenchmarkValues(
       benchmarkHistory,
       dates,
@@ -214,9 +216,7 @@ export async function getMetrics(request: Request, session: Session) {
       const priorDates = curve.dates.slice(0, windowStart);
       const priorValues = curve.values.slice(0, windowStart);
       if (priorDates.length < 2) return null;
-      const priorFlows = new Map<string, number>();
-      const addPrior = (date: string, amount: number) =>
-        priorFlows.set(date, (priorFlows.get(date) ?? 0) + amount);
+      const priorFlows = new Map<string, DayFlow>();
       for (const lot of holdings as EquityLot[]) {
         if (lot.purchase_date >= startDate) continue;
         const soldSameDay = sellRows
@@ -228,15 +228,15 @@ export async function getMetrics(request: Request, session: Session) {
         );
         if (originalShares <= 0) continue;
         const fx = lot.market === 'US' ? curve.denseRateMap.get(lot.purchase_date) ?? 32 : 1;
-        addPrior(lot.purchase_date, originalShares * Number(lot.cost_price) * fx);
+        addDayFlow(priorFlows, lot.purchase_date, originalShares * Number(lot.cost_price) * fx, 0);
       }
       for (const s of sellRows) {
         if (s.transaction_date >= startDate) continue;
         const fx = s.market === 'US' ? curve.denseRateMap.get(s.transaction_date) ?? 32 : 1;
-        addPrior(s.transaction_date, -Number(s.shares) * Number(s.price) * fx);
+        addDayFlow(priorFlows, s.transaction_date, 0, Number(s.shares) * Number(s.price) * fx);
       }
       const priorIndex = linkTwrIndex(priorDates, priorValues, priorFlows);
-      const priorReturns = periodReturns(priorDates, priorIndex);
+      const priorReturns = periodReturns([priorDates[0], ...priorDates], [1, ...priorIndex]);
       const priorDrawdown = drawdownStats(priorDates, drawdownSeries(priorIndex));
       const realizedPnlTwd = realizedSells
         .filter((s) => s.transaction_date < startDate)

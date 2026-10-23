@@ -316,8 +316,8 @@ function ReturnsSection({
           value={ytd}
           sub={currentYear ? `${currentYear} 年${ytdStart ? ` · 起於 ${ytdStart}` : ''}` : undefined}
         />
-        <HeroReturn label="TWR 年化" value={annualized} sub="策略表現 · 排除資金進出" />
-        <HeroReturn label="XIRR 年化" value={xirr} sub="實際資金 · 納入金額與時點" />
+        <HeroReturn label="TWR 年化" value={annualized} sub={annualized === null ? '未滿一年，不年化' : '策略表現 · 排除資金進出'} />
+        <HeroReturn label="XIRR 年化" value={xirr} sub={xirr === null ? '未滿一年，不年化' : '實際資金 · 納入金額與時點'} />
       </div>
       <p className="text-xs leading-5 text-muted mt-2.5 mb-4">
         前三項為 TWR（時間加權），比較投資策略用；XIRR 檢視個人實際成果。兩者不同屬正常現象。
@@ -427,7 +427,7 @@ function HeroReturn({
     <div className="bg-background border border-border rounded-xl p-4">
       <p className="text-sm font-medium text-muted mb-2">{label}</p>
       <p
-        className={`text-2xl sm:text-3xl font-bold tabular-nums ${up ? 'text-up' : 'text-down'}`}
+        className={`text-2xl sm:text-3xl font-bold tabular-nums ${value === null ? 'text-muted' : up ? 'text-up' : 'text-down'}`}
       >
         {pct(value, true)}
       </p>

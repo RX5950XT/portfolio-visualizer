@@ -47,26 +47,21 @@ export async function buildEquityCurve(
     holdings[0].purchase_date
   );
 
+  // lot-based 下同一檔常有多筆，每檔只抓一次，減少 Yahoo 失敗造成的缺價
+  const symbols = [...new Set(holdings.map((h) => h.symbol))];
   const [historyResults, fxSparse] = await Promise.all([
     Promise.all(
-      holdings.map(async (h) => {
-        const history = await fetchHistory(h.symbol, { startDate: earliestDate });
+      symbols.map(async (symbol) => {
+        const history = await fetchHistory(symbol, { startDate: earliestDate });
         const priceMap = new Map<string, number>();
         history.forEach((p) => priceMap.set(p.date, p.close));
-        return { symbol: h.symbol, priceMap };
+        return { symbol, priceMap };
       })
     ),
     fetchFxHistory(earliestDate),
   ]);
 
-  const historyMap = new Map<string, Map<string, number>>();
-  for (const { symbol, priceMap } of historyResults) {
-    if (!historyMap.has(symbol)) {
-      historyMap.set(symbol, priceMap);
-    } else {
-      for (const [date, price] of priceMap) historyMap.get(symbol)!.set(date, price);
-    }
-  }
+  const historyMap = new Map(historyResults.map((r) => [r.symbol, r.priceMap]));
 
   const getSharesAtDate = makeSharesResolver(sells);
 
@@ -89,6 +84,12 @@ export async function buildEquityCurve(
     let dailyCost = 0;
     let hasAnyHolding = false;
 
+    // 不論當天是否持有都更新最後收盤，假日買進才拿得到前一個交易日的價格
+    for (const [symbol, priceMap] of historyMap) {
+      const close = priceMap.get(date);
+      if (close !== undefined) lastKnownPrices.set(symbol, close);
+    }
+
     for (const holding of holdings) {
       const shares = getSharesAtDate(holding, date);
       if (shares <= 0) continue;
@@ -100,17 +101,9 @@ export async function buildEquityCurve(
       const lotCost = shares * Number(holding.cost_price);
       dailyCost += isUS ? lotCost * rate : lotCost;
 
-      const priceMap = historyMap.get(holding.symbol);
-      let price = priceMap?.get(date);
-      if (price === undefined) {
-        price = lastKnownPrices.get(holding.symbol);
-      } else {
-        lastKnownPrices.set(holding.symbol, price);
-      }
-
-      if (price) {
-        dailyValue += isUS ? shares * price * rate : shares * price;
-      }
+      // 尚無任何收盤價（新上市、抓價失敗）時以成本估值，避免市值憑空歸零再跳回
+      const price = lastKnownPrices.get(holding.symbol) || Number(holding.cost_price);
+      dailyValue += isUS ? shares * price * rate : shares * price;
     }
 
     if (hasAnyHolding && dailyValue > 0) {

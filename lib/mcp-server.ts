@@ -64,7 +64,7 @@ export function createPortfolioMcpServer(store: PortfolioStore): McpServer {
   const scoped = z.object({ portfolio_id: portfolioId.optional() }).strict();
   const analytics: [string, AnalyticsKind, string, string, z.ZodObject][] = [
     ['portfolio_performance', 'performance', '績效分析',
-      '同網站績效分析：returns（TWR 累積 total、ytd、annualized、各曆年 years）、xirr、volatility、sharpe、sortino、winRate、benchmark（同期 S&P 500 以台幣含匯率計的累積報酬與超額報酬）、drawdown（最大回撤摘要）與 benchmarkTrough（同期 S&P 500 最深回撤）。報酬與回撤皆為小數（0.12 = 12%）。同期從最後一次空手超過 21 天之後的重新進場日起算；沒有這種缺口才是首筆買入日至今。資料不足時 data 為 null。', scoped],
+      '同網站績效分析：returns（TWR 累積 total、ytd、annualized、各曆年 years）、xirr、volatility、sharpe、sortino、winRate、benchmark（同期 S&P 500 以台幣含匯率計的累積報酬與超額報酬）、drawdown（最大回撤摘要）與 benchmarkTrough（同期 S&P 500 最深回撤）。報酬與回撤皆為小數（0.12 = 12%）。annualized 與 xirr 未滿一年為 null（不年化）；波動率、Sharpe、Sortino 以日曆日 √365 年化。同期從最後一次空手超過 21 天之後的重新進場日起算；沒有這種缺口才是首筆買入日至今。資料不足時 data 為 null。', scoped],
     ['portfolio_asset_trend', 'asset_trend', '股票總值走勢',
       '同網站股票總值走勢：每日 value（股票市值 TWD，不含現金）、cost（成本 TWD）、benchmark（同樣投入金額買 S&P 500 的市值 TWD）。', scoped],
     ['portfolio_daily_pnl', 'daily_pnl', '每日損益',

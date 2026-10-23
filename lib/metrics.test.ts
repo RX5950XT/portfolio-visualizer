@@ -14,6 +14,7 @@ import {
   sortinoRatio,
   winRate,
   xirr,
+  type DayFlow,
 } from './metrics.ts';
 
 const closeTo = (actual: number | null, expected: number, tolerance = 1e-6): void => {
@@ -26,7 +27,8 @@ describe('風險調整報酬', () => {
     const index = [100, 110, 104.5, 114.95];
 
     assert.ok((sharpeRatio(index, 0) ?? 0) > 0);
-    closeTo(sortinoRatio(index, 0), 27.495454, 1e-5);
+    // 日曆日序列以 √365 年化 = 舊 √252 結果 × √(365/252)
+    closeTo(sortinoRatio(index, 0), 27.495454 * Math.sqrt(365 / 252), 1e-5);
     assert.ok(annualizedVolatility(index) > 0);
   });
 
@@ -116,24 +118,39 @@ describe('既有績效函式', () => {
 
   it('拒絕無效期間資料', () => {
     assert.equal(periodReturns([], []).total, null);
+    assert.equal(periodReturns(['2026-01-01', '2026-12-31'], [1, 1.5]).annualized, null);
+    assert.notEqual(periodReturns(['2025-01-01', '2026-01-01'], [1, 1.5]).annualized, null);
     assert.equal(periodReturns(['2026-01-01', '2026-01-02'], [0, 1]).total, null);
   });
 });
 
 describe('空手缺口的 TWR', () => {
-  it('把落在兩個觀察日之間的賣出提領算進下一日，而不是當成資產歸零', () => {
-    const flows = new Map<string, number>([
-      ['2024-11-11', -11381],
-      ['2024-12-10', 1148],
+  it('賣光與重新買進分兩段連乘，不混成一筆', () => {
+    const flows = new Map<string, DayFlow>([
+      ['2024-11-11', { buy: 0, sell: 11381 }],
+      ['2024-12-10', { buy: 1148, sell: 0 }],
     ]);
     const index = linkTwrIndex(['2024-11-10', '2024-12-10'], [11000, 1200], flows);
-    closeTo(index[1], (1200 - (1148 - 11381)) / 11000, 1e-9);
+    closeTo(index[1], (11381 / 11000) * (1200 / 1148), 1e-9);
   });
 
-  it('同一觀察日的買賣仍只計當日淨注入', () => {
-    const flows = new Map<string, number>([['2026-01-16', 573]]);
+  it('買進計入當日本金，小部位大筆加碼不會暴漲', () => {
+    const flows = new Map<string, DayFlow>([['2026-01-16', { buy: 1_000_000, sell: 0 }]]);
+    const index = linkTwrIndex(['2026-01-15', '2026-01-16'], [5000, 1_015_000], flows);
+    closeTo(index[1], 1_015_000 / 1_005_000, 1e-9);
+  });
+
+  it('首日成交價到收盤的漲跌記在 index[0]', () => {
+    const flows = new Map<string, DayFlow>([['2026-01-15', { buy: 100_000, sell: 0 }]]);
+    const index = linkTwrIndex(['2026-01-15', '2026-01-16'], [101_000, 103_020], flows);
+    closeTo(index[0], 1.01, 1e-9);
+    closeTo(index[1], 1.0302, 1e-9);
+  });
+
+  it('同日買賣：買進算期初、賣出算期末', () => {
+    const flows = new Map<string, DayFlow>([['2026-01-16', { buy: 573, sell: 100 }]]);
     const index = linkTwrIndex(['2026-01-15', '2026-01-16'], [300000, 300000], flows);
-    closeTo(index[1], (300000 - 573) / 300000, 1e-9);
+    closeTo(index[1], 300100 / 300573, 1e-9);
   });
 
   it('買進當日已賣出的股數要加回取得股數', () => {
