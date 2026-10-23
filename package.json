@@ -10,7 +10,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "node --experimental-strip-types --test lib/metrics.test.ts lib/mcp.test.ts lib/chart-period.test.ts tools/next-eslint-glob/index.test.cjs",
+    "test": "node --experimental-strip-types --test lib/metrics.test.ts lib/auth-token.test.ts lib/mcp.test.ts lib/chart-period.test.ts tools/next-eslint-glob/index.test.cjs",
     "test:coverage": "node --experimental-strip-types --experimental-test-coverage --test-coverage-include=lib/metrics.ts --test-coverage-lines=80 --test-coverage-functions=80 --test-coverage-branches=80 --test lib/metrics.test.ts"
   },
   "dependencies": {

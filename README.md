@@ -30,12 +30,12 @@
 - **統一貨幣**：美股資產透過即時匯率換算為新台幣（TWD）顯示。
 
 ### 🛡️ 安全與權限（RBAC）
-- **Admin（管理員）**：完整讀寫權限，可管理登入與 MCP 連線設定。
-- **Guest（訪客）**：唯讀模式，僅能看到管理員開放的投資組合。
-- **Demo（試玩沙盒）**：輸入公開密碼 `demo` 進入**每人專屬的獨立沙盒**（可於 `/settings` 開關），可自由增刪改體驗，
+- **帳號＋密碼登入**：管理員與每個訪客各有自己的帳號（不分大小寫）。
+- **Admin（管理員）**：完整讀寫權限，可管理訪客帳號、Demo 開關與 MCP 連線設定。
+- **Guest（訪客）**：唯讀；管理員可在 `/settings` 建立多組訪客帳號，逐一勾選每個帳號能看的投資組合。刪除帳號後該訪客立即被登出。
+- **Demo（試玩沙盒）**：登入頁按「直接進入 Demo」免帳密進入**每人專屬的獨立沙盒**（可於 `/settings` 開關），可自由增刪改體驗，
   碰不到管理員與訪客的任何資料；預設種子為「一年前各投入 NT$50 萬買 VT 與 0050」，24 小時後自動重置。不提供設定與 MCP 金鑰管理。
-- **HMAC 簽章 Cookie**：認證 token 採 HMAC-SHA256 簽章，無法手動偽造（demo 的沙盒 id 亦納入簽章）。
-- **訪客可見性控制**：每個投資組合可獨立設定是否對訪客開放。
+- **HMAC 簽章 Cookie**：認證 token 採 HMAC-SHA256 簽章，無法手動偽造（訪客帳號 id、demo 沙盒 id 亦納入簽章）。
 
 ---
 
@@ -76,13 +76,11 @@ npm install
 # 產生方式：openssl rand -hex 32
 AUTH_SECRET=your_64_char_hex_secret_here
 
-# 管理員密碼（首次引導用；於 /settings 設定後以資料庫 scrypt 雜湊為準）
+# 管理員帳號／密碼（首次引導用；於 /settings 儲存後以資料庫 scrypt 雜湊為準）
+SITE_USERNAME=admin
 SITE_PASSWORD=your_admin_password
 
-# 訪客密碼（可選；首次引導用，之後可於 /settings 修改）
-GUEST_PASSWORD=your_guest_password
-
-# Demo 空間：公開密碼固定為 demo，啟用狀態存於資料庫（/settings 可開關）
+# 訪客帳號一律在 /settings 建立；Demo 免帳密，啟用狀態存於資料庫（/settings 可開關）
 
 # ── Supabase ───────────────────────────────────────────────────────
 NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
@@ -92,7 +90,7 @@ SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 
 > **⚠️ 重要**：`AUTH_SECRET` 未設定或長度不足 32 字元時，應用程式會在登入時直接報錯。Vercel 部署也需在 Dashboard → Settings → Environment Variables 設定相同值。
 >
-> `SITE_PASSWORD` / `GUEST_PASSWORD` 僅作**首次引導**：管理員於 `/settings` 設定密碼後，以資料庫雜湊為準，env 即失效。MCP 金鑰由設定頁產生，資料庫只存 SHA-256 雜湊。
+> `SITE_USERNAME`（預設 `admin`）/ `SITE_PASSWORD` 僅作**首次引導**：管理員於 `/settings` 儲存一次後，以資料庫帳號為準，env 即失效。舊版 `GUEST_PASSWORD` 已廢止。MCP 金鑰由設定頁產生，資料庫只存 SHA-256 雜湊。
 >
 > **忘記密碼**：到 Supabase 刪除 `app_settings` 中 `key = 'auth_config'` 的列，即可回到 env 引導密碼登入。
 
@@ -285,12 +283,12 @@ portfolio-app/
 
 ## 🔐 安全說明
 
-- **Cookie 防偽造**：Cookie 值為 `<role>.<exp>.<HMAC-SHA256-sig>`（demo 為 `demo.<space>.<exp>.<sig>`），偽造需要 `AUTH_SECRET`；demo 的沙盒 id 納入簽章，無法竄改成他人沙盒。
+- **Cookie 防偽造**：Cookie 值為 `admin.<exp>.<HMAC-SHA256-sig>`（guest／demo 為 `<role>.<id>.<exp>.<sig>`），偽造需要 `AUTH_SECRET`；訪客帳號 id 與 demo 沙盒 id 納入簽章，無法竄改成他人身分或沙盒。
 - **資料庫存取收斂**：所有資料表**僅** GRANT 給 `service_role`，**不開放** `anon`/`authenticated`；app 一律經伺服器端 service_role 存取。如此即使公開的 anon key 外流，未登入者打 Data API 也只會得到 `401`，無法繞過密碼直讀資料。
 - **RLS 預設拒絕**：資料表啟用 RLS 但不建立寬鬆 policy（禁用 `USING(true)`）；service_role 不受 RLS 限制，app 正常運作。
 - **MCP 金鑰保護**：隨機 256-bit 金鑰只在建立時回傳一次，資料庫只存 SHA-256 雜湊。管理端限 admin，專用金鑰可讀真實投資資料，並透過 MCP 新增、賣出、編輯持股與設定現金；不能刪除、不能碰 Demo，也不能存取網站其他 API 或設定端點。已移除的 OpenRouter 功能不再讀取舊 `ai_config`，既有儲存值不自動刪除。
-- **登入密碼雜湊**：管理員／訪客密碼以 scrypt 存 `app_settings.auth_config`（salt+hash）；env 僅首次引導。Demo 公開密碼固定 `demo`，開關存同 key。GET 永不回傳 salt/hash。
-- **訪客隔離**：API 層強制過濾，訪客只能讀取 `visible_to_guest = true` 的組合。
+- **登入密碼雜湊**：管理員／訪客帳號與 scrypt 雜湊存 `app_settings.auth_config`（`adminAccount`、`guestAccounts`）；env 僅首次引導。Demo 免帳密，開關存同 key。GET 永不回傳 salt/hash。
+- **訪客隔離**：API 層強制過濾，訪客只能讀取自己帳號被授權的組合（`guestAccounts[].portfolioIds`）；每次請求回查帳號，刪除即失效。舊 `visible_to_guest` 欄位已不使用。
 - **Demo 沙盒隔離**：4 張資料表帶 `demo_space`（真實資料為 NULL）。所有查詢經 `scopeQuery` 統一套述詞——admin/guest 查 `demo_space IS NULL`、demo 查 `= 自己的 space`。因此 demo 就算帶著真實資料的 row id 打寫入端點，也只會匹配 0 筆而無效（安全 by construction）。
 - **密碼比對**：env 明文用字串 timing-safe；DB 雜湊用 Buffer timing-safe 比對 scrypt 結果。
 - **失敗延遲**：登入失敗固定延遲 400ms 阻擋快速暴力破解（正式環境建議於 Vercel 邊界再加 rate limit）。

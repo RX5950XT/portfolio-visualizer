@@ -1,22 +1,15 @@
 import { NextResponse } from 'next/server';
-import { getUserRole, verifyPassword } from '@/lib/auth';
+import { requireAdmin, verifyAdminPassword } from '@/lib/auth';
 import {
+  bootstrapAdminUsername,
   getAuthConfig,
   saveAuthConfig,
   hashPassword,
-  MIN_PASSWORD_LENGTH,
-  type AuthConfig,
+  isValidUsername,
+  normalizeUsername,
 } from '@/lib/auth-config';
 
-async function requireAdmin(): Promise<NextResponse | null> {
-  const role = await getUserRole();
-  if (role !== 'admin') {
-    return NextResponse.json({ error: '無權限執行此操作' }, { status: 403 });
-  }
-  return null;
-}
-
-// GET: 來源狀態與 demo 開關；雜湊/salt 永不出網
+// GET: 管理員帳號、demo 開關與訪客帳號清單；雜湊/salt 永不出網
 export async function GET(): Promise<NextResponse> {
   const forbidden = await requireAdmin();
   if (forbidden) return forbidden;
@@ -25,13 +18,14 @@ export async function GET(): Promise<NextResponse> {
     const config = await getAuthConfig();
     return NextResponse.json({
       data: {
-        adminSource: config.admin ? 'db' : 'env',
-        guestSource: config.guest
-          ? 'db'
-          : process.env.GUEST_PASSWORD
-            ? 'env'
-            : 'none',
+        adminUsername: config.adminAccount?.username ?? bootstrapAdminUsername(),
+        adminSource: config.adminAccount ? 'db' : 'env',
         demoEnabled: config.demoEnabled,
+        guests: config.guestAccounts.map((g) => ({
+          id: g.id,
+          username: g.username,
+          portfolioIds: g.portfolioIds,
+        })),
       },
     });
   } catch {
@@ -39,7 +33,11 @@ export async function GET(): Promise<NextResponse> {
   }
 }
 
-// PUT: 改密碼／開關；整包存檔必須先通過目前管理員密碼
+function badRequest(error: string): NextResponse {
+  return NextResponse.json({ error }, { status: 400 });
+}
+
+// PUT: 改管理員帳號／密碼、demo 開關；必須先通過目前管理員密碼
 export async function PUT(request: Request): Promise<NextResponse> {
   const forbidden = await requireAdmin();
   if (forbidden) return forbidden;
@@ -47,62 +45,39 @@ export async function PUT(request: Request): Promise<NextResponse> {
   try {
     const body = await request.json().catch(() => null);
     const currentPassword =
-      body && typeof body.currentPassword === 'string'
-        ? body.currentPassword
-        : '';
+      typeof body?.currentPassword === 'string' ? body.currentPassword : '';
+    if (!currentPassword) return badRequest('請輸入目前管理員密碼');
 
-    if (!currentPassword) {
-      return NextResponse.json(
-        { error: '請輸入目前管理員密碼' },
-        { status: 400 }
-      );
-    }
-
-    const role = await verifyPassword(currentPassword);
-    if (role !== 'admin') {
+    const current = await getAuthConfig();
+    if (!verifyAdminPassword(currentPassword, current)) {
       return NextResponse.json({ error: '目前密碼不正確' }, { status: 403 });
     }
 
-    const current = await getAuthConfig();
-    const next: AuthConfig = {
-      admin: current.admin,
-      guest: current.guest,
-      demoEnabled: current.demoEnabled,
-    };
-
-    if (body && typeof body.demoEnabled === 'boolean') {
-      next.demoEnabled = body.demoEnabled;
+    const username =
+      normalizeUsername(body?.newAdminUsername) ||
+      current.adminAccount?.username ||
+      bootstrapAdminUsername();
+    if (!isValidUsername(username)) {
+      return badRequest('帳號限 3–32 字元的英數字、點、底線或連字號');
+    }
+    if (current.guestAccounts.some((g) => g.username === username)) {
+      return badRequest('此帳號已被訪客使用');
     }
 
-    const adminPw =
-      body && typeof body.newAdminPassword === 'string'
-        ? body.newAdminPassword.trim()
-        : '';
-    if (adminPw) {
-      if (adminPw.length < MIN_PASSWORD_LENGTH) {
-        return NextResponse.json(
-          { error: `管理員密碼至少 ${MIN_PASSWORD_LENGTH} 字元` },
-          { status: 400 }
-        );
-      }
-      next.admin = hashPassword(adminPw);
-    }
+    const newPassword =
+      typeof body?.newAdminPassword === 'string' ? body.newAdminPassword.trim() : '';
 
-    const guestPw =
-      body && typeof body.newGuestPassword === 'string'
-        ? body.newGuestPassword.trim()
-        : '';
-    if (guestPw) {
-      if (guestPw.length < MIN_PASSWORD_LENGTH) {
-        return NextResponse.json(
-          { error: `訪客密碼至少 ${MIN_PASSWORD_LENGTH} 字元` },
-          { status: 400 }
-        );
-      }
-      next.guest = hashPassword(guestPw);
-    }
+    // env 首次引導狀態下第一次存檔，以已驗證的目前密碼建立 DB 帳號
+    const password = newPassword
+      ? hashPassword(newPassword)
+      : (current.adminAccount?.password ?? hashPassword(currentPassword));
 
-    await saveAuthConfig(next);
+    await saveAuthConfig({
+      ...current,
+      adminAccount: { username, password },
+      demoEnabled:
+        typeof body?.demoEnabled === 'boolean' ? body.demoEnabled : current.demoEnabled,
+    });
     return NextResponse.json({ data: { success: true } });
   } catch (err) {
     console.error('儲存認證設定失敗:', err);

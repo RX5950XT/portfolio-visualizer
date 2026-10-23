@@ -1,6 +1,12 @@
 import { NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase';
-import { getSession, requireWriteSession, scopeQuery, stampSpace } from '@/lib/auth';
+import {
+  getSession,
+  getVisiblePortfolioIdsForRole,
+  requireWriteSession,
+  scopeQuery,
+  stampSpace,
+} from '@/lib/auth';
 
 // GET: 取得所有投資組合
 export async function GET() {
@@ -16,9 +22,10 @@ export async function GET() {
       session
     ).order('created_at', { ascending: true });
 
-    // 訪客只能看到管理員開放的組合
-    if (session.role === 'guest') {
-      query = query.eq('visible_to_guest', true);
+    // 訪客只能看到管理員授權給該帳號的組合
+    const visibleIds = await getVisiblePortfolioIdsForRole(session);
+    if (visibleIds !== null) {
+      query = query.in('id', visibleIds);
     }
 
     const { data, error } = await query;

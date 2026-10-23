@@ -11,7 +11,7 @@ import { getLookthrough } from '@/lib/analytics/lookthrough';
 import { getEtfExpense } from '@/lib/analytics/etf-expense';
 
 // 專用金鑰只授權管理員的真實資料，不能藉參數切換角色或沙盒。
-const MCP_SESSION: Session = { role: 'admin', demoSpace: null };
+const MCP_SESSION: Session = { role: 'admin', demoSpace: null, guestId: null };
 
 async function assertPortfolio(portfolioId: string): Promise<void> {
   const { data, error } = await scopeQuery(

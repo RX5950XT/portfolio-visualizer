@@ -10,17 +10,12 @@ import {
   Lock,
 } from 'lucide-react';
 import McpSettings from '@/components/McpSettings';
+import GuestAccounts from '@/components/GuestAccounts';
 
 interface AuthSettings {
+  adminUsername: string;
   adminSource: 'db' | 'env';
-  guestSource: 'db' | 'env' | 'none';
   demoEnabled: boolean;
-}
-
-function sourceLabel(source: string): string {
-  if (source === 'db') return '資料庫 ✓';
-  if (source === 'env') return '環境變數（首次引導）';
-  return '未設定';
 }
 
 export default function SettingsPage() {
@@ -35,7 +30,7 @@ export default function SettingsPage() {
   const [authSettings, setAuthSettings] = useState<AuthSettings | null>(null);
   const [currentPassword, setCurrentPassword] = useState('');
   const [newAdminPassword, setNewAdminPassword] = useState('');
-  const [newGuestPassword, setNewGuestPassword] = useState('');
+  const [newAdminUsername, setNewAdminUsername] = useState('');
   const [demoEnabled, setDemoEnabled] = useState(true);
 
   const init = useCallback(async () => {
@@ -53,6 +48,7 @@ export default function SettingsPage() {
       if (authJson.data) {
         const a = authJson.data as AuthSettings;
         setAuthSettings(a);
+        setNewAdminUsername(a.adminUsername);
         setDemoEnabled(a.demoEnabled);
       }
     } catch {
@@ -79,8 +75,8 @@ export default function SettingsPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           currentPassword,
+          newAdminUsername: newAdminUsername.trim() || undefined,
           newAdminPassword: newAdminPassword.trim() || undefined,
-          newGuestPassword: newGuestPassword.trim() || undefined,
           demoEnabled,
         }),
       });
@@ -90,7 +86,6 @@ export default function SettingsPage() {
       }
       setCurrentPassword('');
       setNewAdminPassword('');
-      setNewGuestPassword('');
       setAuthSaved(true);
       await init();
       setTimeout(() => setAuthSaved(false), 2000);
@@ -127,13 +122,14 @@ export default function SettingsPage() {
       <div className="card space-y-5">
         <div className="flex items-center gap-2 text-primary">
           <Lock className="w-5 h-5" />
-          <h2 className="font-semibold">登入密碼</h2>
+          <h2 className="font-semibold">管理員帳號</h2>
         </div>
 
-        <div className="text-xs text-muted space-y-1">
-          <p>管理員密碼：{sourceLabel(authSettings?.adminSource ?? 'env')}</p>
-          <p>訪客密碼：{sourceLabel(authSettings?.guestSource ?? 'none')}</p>
-        </div>
+        {authSettings?.adminSource === 'env' && (
+          <p className="text-xs text-muted">
+            目前使用環境變數首次引導，儲存一次即改存資料庫。
+          </p>
+        )}
 
         <div>
           <label className="block text-sm text-muted mb-1">
@@ -150,28 +146,30 @@ export default function SettingsPage() {
         </div>
 
         <div>
+          <label htmlFor="admin-username" className="block text-sm text-muted mb-1">
+            管理員帳號
+          </label>
+          <input
+            id="admin-username"
+            value={newAdminUsername}
+            onChange={(e) => setNewAdminUsername(e.target.value)}
+            className="w-full"
+            autoComplete="username"
+          />
+        </div>
+
+        <div>
           <label className="block text-sm text-muted mb-1">新管理員密碼</label>
           <input
             type="password"
             value={newAdminPassword}
             onChange={(e) => setNewAdminPassword(e.target.value)}
-            placeholder="留空不變更（至少 8 字元）"
+            placeholder="留空不變更"
             className="w-full"
             autoComplete="new-password"
           />
         </div>
 
-        <div>
-          <label className="block text-sm text-muted mb-1">新訪客密碼</label>
-          <input
-            type="password"
-            value={newGuestPassword}
-            onChange={(e) => setNewGuestPassword(e.target.value)}
-            placeholder="留空不變更（至少 8 字元）"
-            className="w-full"
-            autoComplete="new-password"
-          />
-        </div>
 
         <label className="flex min-h-11 items-center gap-3 text-sm cursor-pointer">
           <input
@@ -180,7 +178,7 @@ export default function SettingsPage() {
             onChange={(e) => setDemoEnabled(e.target.checked)}
             className="h-5 w-5 shrink-0 rounded accent-primary"
           />
-          <span>啟用 Demo 空間（公開密碼 <code>demo</code>）</span>
+          <span>開放 Demo 模式（登入頁顯示一鍵進入按鈕）</span>
         </label>
 
         {authError && <p className="text-sm text-down">{authError}</p>}
@@ -195,11 +193,12 @@ export default function SettingsPage() {
           ) : (
             <Save className="w-4 h-4" />
           )}
-          {authSaved ? '已儲存' : authSaving ? '儲存中…' : '儲存密碼設定'}
+          {authSaved ? '已儲存' : authSaving ? '儲存中…' : '儲存帳號設定'}
         </button>
       </div>
 
       {error && <p role="alert" className="text-sm text-down">{error}</p>}
+      <GuestAccounts />
       <McpSettings />
     </div>
   );

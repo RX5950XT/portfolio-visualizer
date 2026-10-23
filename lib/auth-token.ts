@@ -2,17 +2,18 @@
 // 故意不依賴 next/headers 或 node:crypto，因為 middleware 在 Edge runtime 執行
 //
 // Token 格式：
-//   admin/guest：<role>.<expiry>.<base64url(HMAC-SHA256)>
-//   demo：      demo.<space>.<expiry>.<base64url(HMAC-SHA256)>
+//   admin：      admin.<expiry>.<base64url(HMAC-SHA256)>
+//   guest/demo： <role>.<id>.<expiry>.<base64url(HMAC-SHA256)>（id = 訪客帳號 id／demo 沙盒）
 // Why: 舊版 cookie 值為純文字 role，攻擊者可手動設 cookie 繞過登入。
 //      簽章後即使知道格式也無法偽造——缺少 AUTH_SECRET 就算不出正確簽章。
-//      demo 的 space 也納入簽章負載，否則可改 cookie 竄入他人沙盒。
+//      id 也納入簽章負載，否則可改 cookie 竄入他人沙盒或冒用其他訪客的可見範圍。
 
 export type UserRole = 'admin' | 'guest' | 'demo';
 
 export interface Session {
   role: UserRole;
   demoSpace: string | null; // 僅 demo 角色為非 null
+  guestId: string | null; // 僅 guest 角色為非 null
 }
 
 const COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 7; // admin/guest：7 天
@@ -26,8 +27,8 @@ export function maxAgeForRole(role: UserRole): number {
   return role === 'demo' ? DEMO_MAX_AGE_SECONDS : COOKIE_MAX_AGE_SECONDS;
 }
 
-// space 為 crypto.randomUUID() 產生；限定字元集確保不含 '.' 而破壞 token 分段
-const DEMO_SPACE_RE = /^[0-9a-f-]{36}$/;
+// id 皆為 crypto.randomUUID() 產生；限定字元集確保不含 '.' 而破壞 token 分段
+const ID_RE = /^[0-9a-f-]{36}$/;
 
 function getSecret(): string {
   const secret = process.env.AUTH_SECRET;
@@ -71,19 +72,19 @@ export function timingSafeEqual(a: string, b: string): boolean {
 
 export async function createAuthToken(
   role: UserRole,
-  demoSpace?: string | null
+  id?: string | null
 ): Promise<string> {
   const exp = Math.floor(Date.now() / 1000) + maxAgeForRole(role);
 
-  if (role === 'demo') {
-    if (!demoSpace || !DEMO_SPACE_RE.test(demoSpace)) {
-      throw new Error('demo token 需要合法的 demoSpace');
+  if (role !== 'admin') {
+    if (!id || !ID_RE.test(id)) {
+      throw new Error(`${role} token 需要合法的 id`);
     }
-    const payload = `demo.${demoSpace}.${exp}`;
+    const payload = `${role}.${id}.${exp}`;
     return `${payload}.${await hmacSign(payload)}`;
   }
 
-  const payload = `${role}.${exp}`;
+  const payload = `admin.${exp}`;
   return `${payload}.${await hmacSign(payload)}`;
 }
 
@@ -94,28 +95,30 @@ export async function verifyAuthToken(
 
   const parts = token.split('.');
 
-  // demo：demo.<space>.<exp>.<sig>
+  // guest/demo：<role>.<id>.<exp>.<sig>
   if (parts.length === 4) {
-    const [role, space, expStr, sig] = parts;
-    if (role !== 'demo' || !DEMO_SPACE_RE.test(space)) return null;
+    const [role, id, expStr, sig] = parts;
+    if ((role !== 'demo' && role !== 'guest') || !ID_RE.test(id)) return null;
     if (!isUnexpired(expStr)) return null;
 
-    const expected = await hmacSign(`demo.${space}.${expStr}`);
+    const expected = await hmacSign(`${role}.${id}.${expStr}`);
     if (!timingSafeEqual(sig, expected)) return null;
 
-    return { role: 'demo', demoSpace: space };
+    return role === 'demo'
+      ? { role, demoSpace: id, guestId: null }
+      : { role, demoSpace: null, guestId: id };
   }
 
-  // admin/guest：<role>.<exp>.<sig>
+  // admin：admin.<exp>.<sig>（舊版 3 段 guest token 不再接受 → 強制以帳號重登）
   if (parts.length === 3) {
     const [role, expStr, sig] = parts;
-    if (role !== 'admin' && role !== 'guest') return null;
+    if (role !== 'admin') return null;
     if (!isUnexpired(expStr)) return null;
 
-    const expected = await hmacSign(`${role}.${expStr}`);
+    const expected = await hmacSign(`admin.${expStr}`);
     if (!timingSafeEqual(sig, expected)) return null;
 
-    return { role, demoSpace: null };
+    return { role, demoSpace: null, guestId: null };
   }
 
   return null;

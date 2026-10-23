@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { randomUUID } from 'node:crypto';
-import { verifyPassword, setAuthCookie, clearAuthCookie } from '@/lib/auth';
+import { verifyCredentials, setAuthCookie, clearAuthCookie } from '@/lib/auth';
+import { getAuthConfig } from '@/lib/auth-config';
 import { seedDemoSpace, sweepExpiredDemo } from '@/lib/demo-seed';
 
 // Why: Serverless 環境無法共享狀態，這裡加固定延遲讓每次嘗試至少耗費數百毫秒，
@@ -11,35 +12,42 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// POST: 登入
+// demo：免帳密，每次登入配一個全新沙盒，並順手清掉過期的舊沙盒
+async function loginDemo(): Promise<NextResponse> {
+  const config = await getAuthConfig();
+  if (!config.demoEnabled) {
+    return NextResponse.json({ error: 'Demo 模式未開放' }, { status: 403 });
+  }
+  await sweepExpiredDemo();
+  const demoSpace = randomUUID();
+  await seedDemoSpace(demoSpace);
+  await setAuthCookie('demo', demoSpace);
+  return NextResponse.json({ data: { success: true, role: 'demo' } });
+}
+
+// POST: 登入（{ username, password } 或 { demo: true }）
 export async function POST(request: Request) {
   try {
     const body = await request.json().catch(() => null);
-    const password = body && typeof body.password === 'string' ? body.password : '';
+    if (body?.demo === true) return await loginDemo();
 
-    if (!password) {
+    const username = typeof body?.username === 'string' ? body.username : '';
+    const password = typeof body?.password === 'string' ? body.password : '';
+
+    if (!username || !password) {
       await sleep(FAILED_LOGIN_DELAY_MS);
-      return NextResponse.json({ error: '請輸入密碼' }, { status: 400 });
+      return NextResponse.json({ error: '請輸入帳號與密碼' }, { status: 400 });
     }
 
-    const role = await verifyPassword(password);
+    const credential = await verifyCredentials(username, password);
 
-    if (!role) {
+    if (!credential) {
       await sleep(FAILED_LOGIN_DELAY_MS);
-      return NextResponse.json({ error: '密碼錯誤' }, { status: 401 });
+      return NextResponse.json({ error: '帳號或密碼錯誤' }, { status: 401 });
     }
 
-    // demo：每次登入配一個全新沙盒，並順手清掉過期的舊沙盒
-    if (role === 'demo') {
-      await sweepExpiredDemo();
-      const demoSpace = randomUUID();
-      await seedDemoSpace(demoSpace);
-      await setAuthCookie(role, demoSpace);
-      return NextResponse.json({ data: { success: true, role } });
-    }
-
-    await setAuthCookie(role);
-    return NextResponse.json({ data: { success: true, role } });
+    await setAuthCookie(credential.role, credential.guestId);
+    return NextResponse.json({ data: { success: true, role: credential.role } });
   } catch (err) {
     console.error('登入錯誤:', err);
     return NextResponse.json({ error: '伺服器錯誤' }, { status: 500 });

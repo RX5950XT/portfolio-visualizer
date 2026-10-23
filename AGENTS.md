@@ -26,8 +26,8 @@
 - RLS 啟用但**禁用 `USING(true)`**；不開放就不建 policy（RLS on + 無 policy = 預設拒絕）。
 - 新表上線：用 anon key 打 `GET /rest/v1/<table>` **必須回 401** 才算安全。
 - MCP 金鑰只在建立時回傳一次，SHA-256 雜湊存 `app_settings.mcp_config`（僅 service_role）；管理 API 限 admin。`/api/mcp` 只接受專用 Bearer 金鑰，提供讀取工具（分析與網站共用 `lib/analytics/`）與 `holding_add`／`holding_sell`／`holding_update`／`cash_set`（與網站共用 `lib/trades.ts`），使用 `scopeQuery` 排除 Demo。secrets 不硬編碼，`.env*` 不進 git。
-- **登入密碼**以 scrypt 雜湊存 `app_settings.auth_config`（`lib/auth-config.ts`）；`SITE_PASSWORD`/`GUEST_PASSWORD` 僅首次引導，DB 有雜湊後 env 失效。Demo 密碼為公開常數 `demo`，開關存同 key。改密碼必須先驗證目前 admin 密碼；`/api/settings/auth` 永不回 salt/hash。
-- 認證走 HMAC 簽章 cookie；三種角色 `admin`／`guest`／`demo`。寫入端點 `requireWriteSession()`（放行 admin/demo、擋 guest），讀取端點套訪客可見性過濾；設定端點維持 admin 專屬。MCP 金鑰不得授權網站其他 API。
+- **登入**為帳號＋密碼：`app_settings.auth_config` 存 `adminAccount`（單一）與 `guestAccounts[]`（各自 `portfolioIds`），scrypt 雜湊（`lib/auth-config.ts`）。`SITE_USERNAME`/`SITE_PASSWORD` 僅首次引導，DB 有 adminAccount 後 env 失效。Demo 免帳密（`POST /api/auth {demo:true}`），開關存同 key。改管理員帳密／Demo 開關必須先驗證目前 admin 密碼；設定 API 永不回 salt/hash。
+- 認證走 HMAC 簽章 cookie；三種角色 `admin`／`guest`／`demo`，guest token 簽入帳號 id，`getSession` 每次回查帳號存在（刪除即失效）。寫入端點 `requireWriteSession()`（放行 admin/demo、擋 guest），讀取端點一律經 `getVisiblePortfolioIdsForRole`（訪客 = 帳號授權清單 ∩ 真實組合）；設定端點 `requireAdmin()`。MCP 金鑰不得授權網站其他 API。
 - **Demo 沙盒鐵則**：`portfolios`/`holdings`/`cash_balance`/`transactions` 帶 `demo_space`（真實資料為 NULL）。
   這 4 表的每個 SELECT/UPDATE/DELETE **一律經 `scopeQuery(query, session)`**、每個 INSERT **一律併入 `stampSpace(session)`**——這是隔離的唯一真相來源，漏一處就是資料外洩或誤刪。
   多個 delete 的端點（如 `portfolios/[id]` DELETE）**每一個 delete 都要套**。

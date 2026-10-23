@@ -46,7 +46,7 @@ export async function GET(request: Request, { params }: RouteParams) {
   }
 }
 
-// PUT: 更新投資組合（重命名 / 切換訪客可見性）
+// PUT: 更新投資組合（重命名）
 export async function PUT(request: Request, { params }: RouteParams) {
   try {
     const auth = await requireWriteSession();
@@ -54,15 +54,12 @@ export async function PUT(request: Request, { params }: RouteParams) {
 
     const { id } = await params;
     const body = await request.json();
-    const { name, visible_to_guest } = body;
+    const { name } = body;
 
     // 至少要提供一個可更新的欄位
     const updateData: Record<string, unknown> = {};
     if (typeof name === 'string' && name.trim()) {
       updateData.name = name.trim();
-    }
-    if (typeof visible_to_guest === 'boolean') {
-      updateData.visible_to_guest = visible_to_guest;
     }
 
     if (Object.keys(updateData).length === 0) {

@@ -2,10 +2,11 @@ import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { createServerClient } from '@/lib/supabase';
 import {
-  DEMO_PASSWORD,
-  MIN_PASSWORD_LENGTH,
+  bootstrapAdminUsername,
   getAuthConfig,
+  normalizeUsername,
   verifyPasswordHash,
+  type AuthConfig,
 } from '@/lib/auth-config';
 import {
   AUTH_COOKIE_NAME,
@@ -19,55 +20,59 @@ import {
 
 export type { UserRole, Session };
 
-// 驗證密碼並回傳角色
-// Why: DB 有雜湊以 DB 為準；null 才回退 env（首次引導）。demo 為公開常數 + 開關。
-export async function verifyPassword(
+export type Credential =
+  | { role: 'admin'; guestId: null }
+  | { role: 'guest'; guestId: string };
+
+// 驗證管理員密碼
+// Why: DB 有帳號以 DB 為準；null 才回退 env SITE_PASSWORD（首次引導）
+export function verifyAdminPassword(
+  password: string,
+  config: AuthConfig
+): boolean {
+  if (config.adminAccount) {
+    return verifyPasswordHash(password, config.adminAccount.password);
+  }
+  const adminPassword = process.env.SITE_PASSWORD;
+  if (!adminPassword) {
+    console.warn('SITE_PASSWORD 環境變數未設定，且資料庫尚未設定管理員帳號');
+    return false;
+  }
+  return timingSafeEqual(password, adminPassword);
+}
+
+// 以帳號＋密碼驗證並回傳角色；demo 不走此路（免帳密，見 /api/auth）
+export async function verifyCredentials(
+  username: string,
   password: string
-): Promise<UserRole | null> {
-  if (typeof password !== 'string' || password.length === 0) return null;
+): Promise<Credential | null> {
+  const name = normalizeUsername(username);
+  if (!name || typeof password !== 'string' || password.length === 0) {
+    return null;
+  }
 
   const config = await getAuthConfig();
-
-  if (config.admin) {
-    if (verifyPasswordHash(password, config.admin)) return 'admin';
-  } else {
-    const adminPassword = process.env.SITE_PASSWORD;
-    if (!adminPassword) {
-      console.warn(
-        'SITE_PASSWORD 環境變數未設定，且資料庫尚未設定管理員密碼'
-      );
-    } else if (adminPassword.length < MIN_PASSWORD_LENGTH) {
-      // 引導密碼過短即拒用，避免弱密碼長期把守 admin 入口
-      console.warn(
-        `SITE_PASSWORD 長度不足 ${MIN_PASSWORD_LENGTH} 字元，已忽略；請於 /settings 設定更強的密碼`
-      );
-    } else if (timingSafeEqual(password, adminPassword)) {
-      return 'admin';
-    }
+  const adminName = config.adminAccount?.username ?? bootstrapAdminUsername();
+  if (name === adminName) {
+    return verifyAdminPassword(password, config)
+      ? { role: 'admin', guestId: null }
+      : null;
   }
 
-  if (config.guest) {
-    if (verifyPasswordHash(password, config.guest)) return 'guest';
-  } else {
-    const guestPassword = process.env.GUEST_PASSWORD;
-    if (guestPassword && timingSafeEqual(password, guestPassword)) {
-      return 'guest';
-    }
+  const guest = config.guestAccounts.find((g) => g.username === name);
+  if (guest && verifyPasswordHash(password, guest.password)) {
+    return { role: 'guest', guestId: guest.id };
   }
-
-  if (config.demoEnabled && timingSafeEqual(password, DEMO_PASSWORD)) {
-    return 'demo';
-  }
-
   return null;
 }
 
 // 設定認證 Cookie（HMAC 簽章 token）
+// id：guest 為帳號 id、demo 為沙盒 id、admin 不帶
 export async function setAuthCookie(
   role: UserRole,
-  demoSpace?: string | null
+  id?: string | null
 ): Promise<void> {
-  const token = await createAuthToken(role, demoSpace);
+  const token = await createAuthToken(role, id);
   const cookieStore = await cookies();
   cookieStore.set(AUTH_COOKIE_NAME, token, {
     httpOnly: true,
@@ -86,10 +91,23 @@ export async function clearAuthCookie(): Promise<void> {
 }
 
 // 取得當前 session（驗證簽章）
+// Why: 訪客帳號被管理員刪除後必須立即失效，簽章本身無法撤銷，故每次回查帳號是否仍存在
 export async function getSession(): Promise<Session | null> {
   const cookieStore = await cookies();
   const token = cookieStore.get(AUTH_COOKIE_NAME)?.value;
-  return verifyAuthToken(token);
+  const session = await verifyAuthToken(token);
+  if (session?.role === 'guest' && !(await findGuestPortfolioIds(session))) {
+    return null;
+  }
+  return session;
+}
+
+async function findGuestPortfolioIds(
+  session: Session
+): Promise<string[] | null> {
+  const config = await getAuthConfig();
+  const guest = config.guestAccounts.find((g) => g.id === session.guestId);
+  return guest ? guest.portfolioIds : null;
 }
 
 // 取得當前用戶角色（驗證簽章）
@@ -134,6 +152,15 @@ export function stampSpace(session: Session): { demo_space?: string } {
   return session.demoSpace !== null ? { demo_space: session.demoSpace } : {};
 }
 
+// 設定類端點：只放行 admin
+export async function requireAdmin(): Promise<NextResponse | null> {
+  const session = await getSession();
+  if (session?.role !== 'admin') {
+    return NextResponse.json({ error: '無權限執行此操作' }, { status: 403 });
+  }
+  return null;
+}
+
 type WriteAuth =
   | { ok: true; session: Session }
   | { ok: false; response: NextResponse };
@@ -159,18 +186,21 @@ export async function requireWriteSession(): Promise<WriteAuth> {
 // 回傳值：
 //   - admin：null（不靠 id 清單，由 scopeQuery 排除 demo 列）
 //   - demo： null（同上，沙盒邊界由 scopeQuery 的 demo_space 述詞保證）
-//   - guest：string[] 可見組合 UUID
+//   - guest：string[] 該訪客帳號被授權、且仍存在的真實組合 UUID
 export async function getVisiblePortfolioIdsForRole(
   session: Session
 ): Promise<string[] | null> {
   if (session.role !== 'guest') return null;
 
+  const allowed = await findGuestPortfolioIds(session);
+  if (!allowed || allowed.length === 0) return [];
+
   const supabase = createServerClient();
   const { data, error } = await supabase
     .from('portfolios')
     .select('id')
-    .eq('visible_to_guest', true)
-    // demo 建立的組合 visible_to_guest 預設為 TRUE，不排除會汙染訪客可見清單
+    .in('id', allowed)
+    // 授權清單只認真實組合，防止任何 demo 沙盒 id 混入
     .is('demo_space', null);
 
   if (error) {
