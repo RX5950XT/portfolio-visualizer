@@ -1,5 +1,10 @@
 import { fetchHistory } from '@/lib/stocks';
-import { fetchFxHistory, buildDenseRateMap, makeSharesResolver } from '@/lib/portfolio-history';
+import {
+  fetchFxHistory,
+  buildDenseRateMap,
+  makeSharesResolver,
+  calendarDates,
+} from '@/lib/portfolio-history';
 
 // 與 app/api/charts/asset-trend 的市值/成本計算邏輯一致，抽出供績效指標重用
 // （asset-trend 維持原樣不動，避免回歸先前修正過的圖表正確性）
@@ -65,12 +70,7 @@ export async function buildEquityCurve(
 
   const getSharesAtDate = makeSharesResolver(sells);
 
-  const startDate = new Date(earliestDate);
-  const endDate = new Date();
-  const dateList: string[] = [];
-  for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
-    dateList.push(d.toISOString().split('T')[0]);
-  }
+  const dateList = calendarDates(earliestDate);
 
   const denseRateMap = buildDenseRateMap(fxSparse, dateList);
 
@@ -99,7 +99,7 @@ export async function buildEquityCurve(
       const rate = isUS ? denseRateMap.get(date) ?? 32 : 1;
 
       const lotCost = shares * Number(holding.cost_price);
-      dailyCost += isUS ? lotCost * rate : lotCost;
+      dailyCost += isUS ? lotCost * (denseRateMap.get(holding.purchase_date) ?? rate) : lotCost;
 
       // 尚無任何收盤價（新上市、抓價失敗）時以成本估值，避免市值憑空歸零再跳回
       const price = lastKnownPrices.get(holding.symbol) || Number(holding.cost_price);

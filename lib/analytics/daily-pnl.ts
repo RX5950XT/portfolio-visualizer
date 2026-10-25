@@ -3,6 +3,7 @@ import { createServerClient } from '@/lib/supabase';
 import { getVisiblePortfolioIdsForRole, scopeQuery, type Session } from '@/lib/auth';
 import { fetchHistory } from '@/lib/stocks';
 import { fetchFxHistory, buildDenseRateMap, makeSharesResolver } from '@/lib/portfolio-history';
+import { taipeiDate } from '@/lib/chart-period';
 
 interface Holding {
   id: string;
@@ -67,24 +68,25 @@ export async function getDailyPnl(request: Request, session: Session) {
       s.setDate(s.getDate() - 10);
       startDateStr = s.toISOString().split('T')[0];
     } else {
-      const endDate = new Date();
-      const startDate = new Date();
-      // 多抓 2.5 倍日曆天，確保涵蓋足夠交易日
-      startDate.setDate(startDate.getDate() - Math.ceil(days * 2.5));
-      startDateStr = startDate.toISOString().split('T')[0];
-      endDateStr = endDate.toISOString().split('T')[0];
+      // 多抓 2.5 倍日曆天，確保涵蓋足夠交易日；結束日用台北今天
+      endDateStr = taipeiDate(new Date());
+      startDateStr = new Date(Date.parse(endDateStr) - Math.ceil(days * 2.5) * 86_400_000)
+        .toISOString()
+        .slice(0, 10);
     }
 
     const holdingIds = holdings.map((h: Holding) => h.id);
+    const uniqueSymbols = [...new Set((holdings as Holding[]).map((h) => h.symbol))];
 
     // 並行取得：各標的歷史股價 + 歷史匯率 + 賣出交易
     const [historyResults, fxSparse, sellsResult] = await Promise.all([
+      // 每檔只抓一次，減少 Yahoo 限流造成的缺價
       Promise.all(
-        holdings.map(async (h: Holding) => {
-          const history = await fetchHistory(h.symbol, { startDate: startDateStr, endDate: endDateStr });
+        uniqueSymbols.map(async (symbol) => {
+          const history = await fetchHistory(symbol, { startDate: startDateStr, endDate: endDateStr });
           const priceMap = new Map<string, number>();
           history.forEach((p) => priceMap.set(p.date, p.close));
-          return { symbol: h.symbol, priceMap };
+          return { symbol, priceMap };
         })
       ),
       fetchFxHistory(startDateStr),
@@ -98,17 +100,7 @@ export async function getDailyPnl(request: Request, session: Session) {
       ),
     ]);
 
-    // 合併同 symbol 的 priceMap（同標的多個 lot 共用同一份歷史）
-    const symbolPriceMap = new Map<string, Map<string, number>>();
-    for (const { symbol, priceMap } of historyResults) {
-      if (!symbolPriceMap.has(symbol)) {
-        symbolPriceMap.set(symbol, priceMap);
-      } else {
-        for (const [date, price] of priceMap) {
-          symbolPriceMap.get(symbol)!.set(date, price);
-        }
-      }
-    }
+    const symbolPriceMap = new Map(historyResults.map((r) => [r.symbol, r.priceMap]));
 
     // 交易日聯集：任何 symbol 有資料的日期都算交易日，按日期升序排列
     const tradingDateSet = new Set<string>();
@@ -119,6 +111,11 @@ export async function getDailyPnl(request: Request, session: Session) {
 
     // 每日匯率（forward-fill 補缺口）
     const denseRateMap = buildDenseRateMap(fxSparse, tradingDates);
+    // 每檔收盤也 forward-fill：台美休市日不同，休市那天沿用前收，休市前後的漲跌才不會整段消失
+    const densePriceMap = new Map<string, Map<string, number>>();
+    for (const [symbol, pm] of symbolPriceMap) {
+      if (pm.size > 0) densePriceMap.set(symbol, buildDenseRateMap(pm, tradingDates));
+    }
     const getSharesAtDate = makeSharesResolver(sellsResult.data || []);
 
     // 以相鄰「交易日」為單位計算損益（自動涵蓋週一←→上個 Friday，不再丟資料）
@@ -135,17 +132,16 @@ export async function getDailyPnl(request: Request, session: Session) {
         const shares = getSharesAtDate(holding, yesterday);
         if (shares <= 0) continue;
 
-        const pm = symbolPriceMap.get(holding.symbol);
+        const pm = densePriceMap.get(holding.symbol);
         const todayPrice = pm?.get(today);
         const yesterdayPrice = pm?.get(yesterday);
 
         if (todayPrice !== undefined && yesterdayPrice !== undefined) {
-          const priceChange = todayPrice - yesterdayPrice;
-          let pnl = priceChange * shares;
-          if (holding.market === 'US') {
-            pnl *= denseRateMap.get(today) ?? 32;
-          }
-          dailyPnL += pnl;
+          // 美股用台幣市值變化：同時含股價與匯率的漲跌，加總才對得上資產變化
+          const isUS = holding.market === 'US';
+          const fxToday = isUS ? denseRateMap.get(today) ?? 32 : 1;
+          const fxYesterday = isUS ? denseRateMap.get(yesterday) ?? 32 : 1;
+          dailyPnL += shares * (todayPrice * fxToday - yesterdayPrice * fxYesterday);
         }
       }
 

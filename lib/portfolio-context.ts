@@ -1,11 +1,13 @@
 import { createServerClient } from '@/lib/supabase';
 import { scopeQuery, type Session } from '@/lib/auth';
 import { fetchMultipleQuotes, fetchExchangeRate } from '@/lib/stocks';
+import { fetchPurchaseFx } from '@/lib/portfolio-history';
 import { z } from 'zod';
 
 const holdingSchema = z.object({
   symbol: z.string().min(1), shares: z.coerce.number().positive(),
   cost_price: z.coerce.number().nonnegative(), market: z.enum(['US', 'TW']),
+  purchase_date: z.string(),
 });
 
 export interface ContextHolding {
@@ -40,7 +42,7 @@ export async function buildPortfolioContext(
   const supabase = createServerClient();
 
   let query = scopeQuery(
-    supabase.from('holdings').select('symbol, shares, cost_price, market').gt('shares', 0),
+    supabase.from('holdings').select('symbol, shares, cost_price, market, purchase_date').gt('shares', 0),
     session
   );
   if (portfolioId) {
@@ -82,17 +84,23 @@ export async function buildPortfolioContext(
     return { ...emptyContext(), cashTwd, totalAssetsTwd: cashTwd, exchangeRate, exchangeRateEstimated };
   }
 
+  // 美股成本用買入日匯率，未實現損益才含匯差（與已實現損益同口徑）
+  const purchaseFx = await fetchPurchaseFx(
+    holdings.filter((h) => h.market === 'US').map((h) => h.purchase_date)
+  );
+
   // 同標的多批次合併
-  const bySymbol = new Map<string, { symbol: string; market: 'US' | 'TW'; shares: number; costOrig: number }>();
+  const bySymbol = new Map<string, { symbol: string; market: 'US' | 'TW'; shares: number; costTwd: number }>();
   for (const lot of holdings) {
     const agg = bySymbol.get(lot.symbol) ?? {
       symbol: lot.symbol,
       market: lot.market,
       shares: 0,
-      costOrig: 0,
+      costTwd: 0,
     };
+    const lotFx = lot.market === 'US' ? purchaseFx(lot.purchase_date) ?? exchangeRate : 1;
     agg.shares += Number(lot.shares);
-    agg.costOrig += Number(lot.shares) * Number(lot.cost_price);
+    agg.costTwd += Number(lot.shares) * Number(lot.cost_price) * lotFx;
     bySymbol.set(lot.symbol, agg);
   }
 
@@ -101,6 +109,7 @@ export async function buildPortfolioContext(
 
   let totalValueTwd = 0;
   let totalCostTwd = 0;
+  let pricedCostTwd = 0; // 缺報價的標的不計入損益，避免市值 0 變成假虧損
   const rows: Omit<ContextHolding, 'weight'>[] = [];
 
   for (const agg of bySymbol.values()) {
@@ -109,9 +118,10 @@ export async function buildPortfolioContext(
     const quotedPrice = quotes.get(agg.symbol)?.regularMarketPrice;
     const price = typeof quotedPrice === 'number' && Number.isFinite(quotedPrice) && quotedPrice > 0 ? quotedPrice : null;
     const valueTwd = price ? agg.shares * price * fx : 0;
-    const costTwd = agg.costOrig * fx;
+    const costTwd = agg.costTwd;
     totalValueTwd += valueTwd;
     totalCostTwd += costTwd;
+    if (price) pricedCostTwd += costTwd;
     rows.push({
       symbol: agg.symbol,
       market: agg.market,
@@ -131,7 +141,7 @@ export async function buildPortfolioContext(
     }))
     .sort((a, b) => b.valueTwd - a.valueTwd);
 
-  const totalGainTwd = totalValueTwd - totalCostTwd;
+  const totalGainTwd = totalValueTwd - pricedCostTwd;
 
   return {
     holdings: holdingsWithWeight,
@@ -140,7 +150,7 @@ export async function buildPortfolioContext(
     cashTwd: Math.round(cashTwd),
     totalAssetsTwd: Math.round(totalAssetsTwd),
     totalGainTwd: Math.round(totalGainTwd),
-    totalGainPercent: totalCostTwd > 0 ? (totalGainTwd / totalCostTwd) * 100 : 0,
+    totalGainPercent: pricedCostTwd > 0 ? (totalGainTwd / pricedCostTwd) * 100 : 0,
     exchangeRate,
     exchangeRateEstimated,
   };

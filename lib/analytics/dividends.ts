@@ -2,7 +2,12 @@ import { NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase';
 import { getVisiblePortfolioIdsForRole, scopeQuery, type Session } from '@/lib/auth';
 import { fetchDividends, fetchDividendInfo, fetchMultipleQuotes } from '@/lib/stocks';
-import { fetchFxHistory, buildDenseRateMap, makeSharesResolver } from '@/lib/portfolio-history';
+import {
+  fetchFxHistory,
+  buildDenseRateMap,
+  makeSharesResolver,
+  calendarDates,
+} from '@/lib/portfolio-history';
 
 interface HoldingRow {
   id: string;
@@ -85,10 +90,7 @@ export async function getDividends(request: Request, session: Session) {
     const symbols = [...symbolInfo.keys()];
 
     // 日期序列 + 密集匯率（含 today）
-    const dateList: string[] = [];
-    for (let d = new Date(earliestDate); d <= new Date(); d.setDate(d.getDate() + 1)) {
-      dateList.push(d.toISOString().split('T')[0]);
-    }
+    const dateList = calendarDates(earliestDate);
     const today = dateList[dateList.length - 1];
 
     const [fxSparse, quotes, divData] = await Promise.all([
@@ -108,21 +110,18 @@ export async function getDividends(request: Request, session: Session) {
     const currentFx = denseRateMap.get(today) ?? 32;
     const divMap = new Map(divData.map((d) => [d.symbol, d]));
 
-    // 近 12 月起點（YYYY-MM）
-    const monthStart = new Date();
-    monthStart.setMonth(monthStart.getMonth() - 11);
-    monthStart.setDate(1);
-    const monthStartStr = monthStart.toISOString().split('T')[0].slice(0, 7);
+    // 近 12 月（YYYY-MM）：用年月整數推算，避免 Date.setMonth 在 29～31 號溢位到下個月
+    const [curYear, curMonth] = today.split('-').map(Number);
+    const monthKey = (offset: number) => {
+      const total = curYear * 12 + (curMonth - 1) + offset;
+      return `${Math.floor(total / 12)}-${String((total % 12) + 1).padStart(2, '0')}`;
+    };
+    const monthStartStr = monthKey(-11);
     const months: { month: string; amount: number }[] = [];
     const monthIndex = new Map<string, number>();
-    {
-      const cursor = new Date(monthStart);
-      for (let i = 0; i < 12; i++) {
-        const key = cursor.toISOString().split('T')[0].slice(0, 7);
-        monthIndex.set(key, months.length);
-        months.push({ month: key, amount: 0 });
-        cursor.setMonth(cursor.getMonth() + 1);
-      }
+    for (let i = -11; i <= 0; i++) {
+      monthIndex.set(monthKey(i), months.length);
+      months.push({ month: monthKey(i), amount: 0 });
     }
 
     const currentMonth = today.slice(0, 7);
@@ -164,7 +163,9 @@ export async function getDividends(request: Request, session: Session) {
         eventsInWindow++;
         const idx = monthIndex.get(key);
         if (idx === undefined) continue;
-        const shAt = sharesAtDate(symbol, ev.date);
+        // 有沒有配息看「除息前一天收盤」的持股：除息當天買的領不到、當天賣的仍領得到
+        const dayBefore = new Date(Date.parse(ev.date) - 86_400_000).toISOString().slice(0, 10);
+        const shAt = sharesAtDate(symbol, dayBefore);
         if (shAt <= 0) continue;
         const fx = isUS ? denseRateMap.get(ev.date) ?? currentFx : 1;
         months[idx].amount += ev.amount * shAt * fx;

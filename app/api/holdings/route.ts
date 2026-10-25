@@ -7,6 +7,7 @@ import {
   scopeQuery,
 } from '@/lib/auth';
 import { addHolding, TradeError } from '@/lib/trades';
+import { fetchPurchaseFx } from '@/lib/portfolio-history';
 import type { Holding } from '@/types';
 
 // GET: 取得指定投資組合的持股
@@ -50,7 +51,16 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: '取得持股失敗' }, { status: 500 });
     }
 
-    return NextResponse.json({ data: data as Holding[] });
+    // 美股附上買入日匯率，未實現損益才含匯差（與已實現損益同口徑）
+    const lots = (data ?? []) as Holding[];
+    const usDates = lots.filter((h) => h.market === 'US').map((h) => h.purchase_date);
+    const purchaseFx = await fetchPurchaseFx(usDates);
+    const withFx = lots.map((h) => ({
+      ...h,
+      cost_fx: h.market === 'US' ? purchaseFx(h.purchase_date) : 1,
+    }));
+
+    return NextResponse.json({ data: withFx });
   } catch {
     return NextResponse.json({ error: '伺服器錯誤' }, { status: 500 });
   }

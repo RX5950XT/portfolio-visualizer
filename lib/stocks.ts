@@ -106,8 +106,9 @@ export async function fetchHistory(
     if (options?.startDate) {
       // 使用自訂日期範圍（period1/period2 為 Unix 時間戳）
       const period1 = Math.floor(new Date(options.startDate).getTime() / 1000);
+      // period2 不含當天，結束日要包含在內就往後推一天
       const period2 = options?.endDate
-        ? Math.floor(new Date(options.endDate).getTime() / 1000)
+        ? Math.floor(new Date(options.endDate).getTime() / 1000) + 86_400
         : Math.floor(Date.now() / 1000);
       url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&period1=${period1}&period2=${period2}`;
     } else {
@@ -131,9 +132,13 @@ export async function fetchHistory(
 
     const timestamps = result.timestamp || [];
     const closes = result.indicators?.quote?.[0]?.close || [];
+    // 日期要用交易所當地時區：匯率 K 棒是倫敦午夜（夏令為前一天 23:00 UTC），直接取 UTC 日期會早一天
+    const toDate = new Intl.DateTimeFormat('en-CA', {
+      timeZone: result.meta?.exchangeTimezoneName || 'UTC',
+    });
 
     return timestamps.map((ts: number, i: number) => ({
-      date: new Date(ts * 1000).toISOString().split('T')[0],
+      date: toDate.format(new Date(ts * 1000)),
       close: closes[i],
     })).filter((item: { close: number }) => item.close != null);
   } catch (error) {

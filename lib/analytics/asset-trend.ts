@@ -2,7 +2,13 @@ import { NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase';
 import { getVisiblePortfolioIdsForRole, scopeQuery, type Session } from '@/lib/auth';
 import { fetchHistory, fetchMultipleQuotes, fetchExchangeRate } from '@/lib/stocks';
-import { fetchFxHistory, buildDenseRateMap, makeSharesResolver } from '@/lib/portfolio-history';
+import {
+  fetchFxHistory,
+  buildDenseRateMap,
+  makeSharesResolver,
+  calendarDates,
+} from '@/lib/portfolio-history';
+import { sharesAcquired } from '@/lib/metrics';
 
 interface Holding {
   id: string;
@@ -66,12 +72,13 @@ export async function getAssetTrend(request: Request, session: Session) {
     // + 即時報價與即時匯率：僅用來覆蓋「今天」這一格，與 dashboard 卡片同源
     const [historyResults, fxSparse, spHistory, sellsResult, liveQuotes, liveRate] =
       await Promise.all([
+        // 每檔只抓一次，減少 Yahoo 限流造成的缺價
         Promise.all(
-          holdings.map(async (h: Holding) => {
-            const history = await fetchHistory(h.symbol, { startDate: earliestDate });
+          uniqueSymbols.map(async (symbol) => {
+            const history = await fetchHistory(symbol, { startDate: earliestDate });
             const priceMap = new Map<string, number>();
             history.forEach((p) => priceMap.set(p.date, p.close));
-            return { symbol: h.symbol, priceMap };
+            return { symbol, priceMap };
           })
         ),
         fetchFxHistory(earliestDate),
@@ -91,26 +98,13 @@ export async function getAssetTrend(request: Request, session: Session) {
     const spSparse = new Map<string, number>();
     for (const p of spHistory) spSparse.set(p.date, p.close);
 
-    const historyMap = new Map<string, Map<string, number>>();
-    for (const { symbol, priceMap } of historyResults) {
-      if (!historyMap.has(symbol)) {
-        historyMap.set(symbol, priceMap);
-      } else {
-        for (const [date, price] of priceMap) {
-          historyMap.get(symbol)!.set(date, price);
-        }
-      }
-    }
+    const historyMap = new Map(historyResults.map((r) => [r.symbol, r.priceMap]));
 
-    const getSharesAtDate = makeSharesResolver(sellsResult.data || []);
+    const sellRows = sellsResult.data || [];
+    const getSharesAtDate = makeSharesResolver(sellRows);
 
     // 產生日曆日期序列（forward-fill 補非交易日）
-    const startDate = new Date(earliestDate);
-    const endDate = new Date();
-    const dateList: string[] = [];
-    for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
-      dateList.push(d.toISOString().split('T')[0]);
-    }
+    const dateList = calendarDates(earliestDate);
 
     // 每日匯率與 S&P 500 價格（逐日，forward/back-fill 補非交易日）
     const denseRateMap = buildDenseRateMap(fxSparse, dateList);
@@ -135,7 +129,14 @@ export async function getAssetTrend(request: Request, session: Session) {
     // spPrice 為 USD，故 TWD 投入需先用買入日匯率換成 USD 再除價；缺價/匯率時該 lot 視為 0（不污染整條線）
     const spSharesByLot = new Map<string, number>();
     for (const holding of holdings as Holding[]) {
-      const originalShares = getSharesAtDate(holding, holding.purchase_date);
+      // 買入當天又賣掉的股數也是當初投入的一部分
+      const soldSameDay = sellRows
+        .filter((s) => s.holding_id === holding.id && s.transaction_date === holding.purchase_date)
+        .reduce((sum, s) => sum + Number(s.shares), 0);
+      const originalShares = sharesAcquired(
+        getSharesAtDate(holding, holding.purchase_date),
+        soldSameDay
+      );
       const isUS = holding.market === 'US';
       const fxAtPurchase = denseRateMap.get(holding.purchase_date) ?? 0;
       const spPriceAtPurchase = spDense.get(holding.purchase_date) ?? 0;
@@ -160,6 +161,12 @@ export async function getAssetTrend(request: Request, session: Session) {
       const spPrice = spDense.get(date) ?? 0;
       const spRate = denseRateMap.get(date) ?? 32;
 
+      // 不論當天是否持有都更新最後收盤，假日買進才拿得到前一個交易日的價格
+      for (const [symbol, priceMap] of historyMap) {
+        const close = priceMap.get(date);
+        if (close !== undefined) lastKnownPrices.set(symbol, close);
+      }
+
       for (const holding of holdings as Holding[]) {
         const shares = getSharesAtDate(holding, date);
         if (shares <= 0) continue;
@@ -168,20 +175,13 @@ export async function getAssetTrend(request: Request, session: Session) {
         const isUS = holding.market === 'US';
         const rate = isUS ? (denseRateMap.get(date) ?? 32) : 1;
 
+        // 成本用買入日匯率：成本線是當初投入的台幣，不隨匯率起伏（與首頁未實現損益同口徑）
         const lotCost = shares * Number(holding.cost_price);
-        dailyCost += isUS ? lotCost * rate : lotCost;
+        dailyCost += isUS ? lotCost * (denseRateMap.get(holding.purchase_date) ?? rate) : lotCost;
 
-        const priceMap = historyMap.get(holding.symbol);
-        let price = priceMap?.get(date);
-        if (price === undefined) {
-          price = lastKnownPrices.get(holding.symbol);
-        } else {
-          lastKnownPrices.set(holding.symbol, price);
-        }
-
-        if (price) {
-          dailyValue += isUS ? shares * price * rate : shares * price;
-        }
+        // 尚無任何收盤價（新上市、抓價失敗）時以成本估值，避免市值憑空歸零再跳回
+        const price = lastKnownPrices.get(holding.symbol) || Number(holding.cost_price);
+        dailyValue += isUS ? shares * price * rate : shares * price;
 
         // 比照賣出：用當日持股 shares 等比例縮放，與市值線同步
         const spPerShare = spSharesByLot.get(holding.id) ?? 0;

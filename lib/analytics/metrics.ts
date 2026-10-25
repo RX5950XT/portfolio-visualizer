@@ -3,7 +3,8 @@ import { createServerClient } from '@/lib/supabase';
 import { getVisiblePortfolioIdsForRole, scopeQuery, type Session } from '@/lib/auth';
 import { buildEquityCurve, type EquityLot } from '@/lib/equity-curve';
 import { buildDenseRateMap } from '@/lib/portfolio-history';
-import { fetchHistory } from '@/lib/stocks';
+import { fetchHistory, fetchDividends } from '@/lib/stocks';
+import { taipeiDate } from '@/lib/chart-period';
 import {
   benchmarkExcessReturn,
   drawdownStats,
@@ -24,6 +25,8 @@ import {
 
 // 無風險利率（年化）：台美折衷，用於 Sharpe；可日後移入設定
 const RISK_FREE = 0.015;
+// 美股配息對台灣居民預扣 30%，績效只算實際入帳的部分
+const US_DIVIDEND_WITHHOLDING = 0.3;
 
 interface SellTxRow {
   holding_id: string;
@@ -127,7 +130,8 @@ export async function getMetrics(request: Request, session: Session) {
     }[];
 
     const earliestDate = holdings[0].purchase_date;
-    const [curve, benchmarkHistory] = await Promise.all([
+    const symbols = [...new Set((holdings as EquityLot[]).map((h) => h.symbol))];
+    const [curve, benchmarkHistory, dividendEvents] = await Promise.all([
       buildEquityCurve(
         holdings as EquityLot[],
         sellRows.map((s) => ({
@@ -136,7 +140,9 @@ export async function getMetrics(request: Request, session: Session) {
           transaction_date: s.transaction_date,
         }))
       ),
-      fetchHistory('^GSPC', { startDate: earliestDate }),
+      // 績效含配息，對照組也用含息的 S&P 500 總報酬指數才公平
+      fetchHistory('^SP500TR', { startDate: earliestDate }),
+      Promise.all(symbols.map(async (symbol) => ({ symbol, events: await fetchDividends(symbol, earliestDate) }))),
     ]);
 
     if (curve.values.length < 2) return NextResponse.json({ data: null });
@@ -185,7 +191,27 @@ export async function getMetrics(request: Request, session: Session) {
       addDayFlow(dayFlows, s.transaction_date, 0, proceeds);
     }
     const currentValue = values[values.length - 1];
-    flows.push({ date: new Date().toISOString().split('T')[0], amount: currentValue });
+    flows.push({ date: taipeiDate(new Date()), amount: currentValue });
+
+    // 配息視為當天取回的現金：TWR 才是含息總報酬。看除息前一天收盤持股，與配息面板一致
+    const dividendFlows: { date: string; amount: number }[] = [];
+    for (const { symbol, events } of dividendEvents) {
+      const lots = (holdings as EquityLot[]).filter((h) => h.symbol === symbol);
+      for (const ev of events) {
+        const dayBefore = new Date(Date.parse(ev.date) - 86_400_000).toISOString().slice(0, 10);
+        const shares = lots.reduce((sum, lot) => sum + curve.getSharesAtDate(lot, dayBefore), 0);
+        if (shares <= 0) continue;
+        const isUS = lots[0].market === 'US';
+        const fx = isUS ? curve.denseRateMap.get(ev.date) ?? 32 : 1;
+        const net = isUS ? 1 - US_DIVIDEND_WITHHOLDING : 1;
+        dividendFlows.push({ date: ev.date, amount: ev.amount * shares * fx * net });
+      }
+    }
+    for (const d of dividendFlows) {
+      if (d.date < startDate) continue;
+      flows.push(d);
+      addDayFlow(dayFlows, d.date, 0, d.amount);
+    }
 
     const twrIndex = linkTwrIndex(dates, values, dayFlows);
 
@@ -235,6 +261,9 @@ export async function getMetrics(request: Request, session: Session) {
         const fx = s.market === 'US' ? curve.denseRateMap.get(s.transaction_date) ?? 32 : 1;
         addDayFlow(priorFlows, s.transaction_date, 0, Number(s.shares) * Number(s.price) * fx);
       }
+      for (const d of dividendFlows) {
+        if (d.date < startDate) addDayFlow(priorFlows, d.date, 0, d.amount);
+      }
       const priorIndex = linkTwrIndex(priorDates, priorValues, priorFlows);
       const priorReturns = periodReturns([priorDates[0], ...priorDates], [1, ...priorIndex]);
       const priorDrawdown = drawdownStats(priorDates, drawdownSeries(priorIndex));
@@ -258,7 +287,7 @@ export async function getMetrics(request: Request, session: Session) {
       winRate: winRate([...pnlByDecision.values()]),
       returns,
       benchmark: {
-        name: 'S&P 500',
+        name: 'S&P 500（含息）',
         total: benchmarkReturn,
         excess: benchmarkExcessReturn(returns.total, benchmarkReturn),
       },

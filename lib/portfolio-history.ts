@@ -1,4 +1,17 @@
 import { fetchHistory } from '@/lib/stocks';
+import { taipeiDate } from '@/lib/chart-period';
+
+// 起始日到「台北今天」的每個日曆日。用台北日期而非 UTC：台北 0～8 點時 UTC 還停在昨天，
+// 會讓今天這格消失、即時報價被蓋到昨天
+export function calendarDates(start: string, end = taipeiDate(new Date())): string[] {
+  const dates: string[] = [];
+  for (let t = Date.parse(start); ; t += 86_400_000) {
+    const date = new Date(t).toISOString().slice(0, 10);
+    if (!(date <= end)) break;
+    dates.push(date);
+  }
+  return dates;
+}
 
 interface SellTx {
   holding_id: string;
@@ -20,6 +33,24 @@ export async function fetchFxHistory(startDate: string): Promise<Map<string, num
     map.set(h.date, h.close);
   }
   return map;
+}
+
+// 買入日匯率查詢：與賣出時算已實現損益的口徑相同（當日或之前最近一筆，早於資料起點用首筆）。
+// 抓不到匯率時回傳 null，由呼叫端退回即時匯率。
+export async function fetchPurchaseFx(dates: string[]): Promise<(date: string) => number | null> {
+  if (dates.length === 0) return () => null;
+  const earliest = dates.reduce((min, d) => (d < min ? d : min), dates[0]);
+  const sparse = await fetchFxHistory(earliest);
+  const fxDates = [...sparse.keys()].sort();
+  if (fxDates.length === 0) return () => null;
+  return (date: string) => {
+    let rate = sparse.get(fxDates[0])!;
+    for (const d of fxDates) {
+      if (d > date) break;
+      rate = sparse.get(d)!;
+    }
+    return rate;
+  };
 }
 
 // 對稀疏 FX map 做 forward-fill；早於最早資料的日期用首筆 back-fill，完全無資料時 fallback 32

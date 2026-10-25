@@ -180,6 +180,10 @@ export async function sellLots(session: Session, input: SellInput) {
     const fxStart =
       earliestPurchase < transaction_date ? earliestPurchase : transaction_date;
     const fxSparse = await fetchFxHistory(fxStart);
+    // 抓不到歷史匯率就不寫入：否則會用 32 估算的已實現損益永久存進資料庫
+    if (fxSparse.size === 0) {
+      throw new TradeError('暫時抓不到匯率，請稍後再試', 503);
+    }
 
     const dateList: string[] = [];
     const endDateObj = new Date(transaction_date);

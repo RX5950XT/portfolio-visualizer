@@ -267,15 +267,14 @@ export default function DashboardPage() {
         const shares = Number(holding.shares);
         const totalCostValue = shares * costPerShare;
         const currentValue = shares * currentPrice;
-        const gain = currentValue - totalCostValue;
-        const gainPercent =
-          totalCostValue > 0 ? (gain / totalCostValue) * 100 : 0;
 
-        // 換算成 TWD
+        // 換算成 TWD：成本用買入日匯率、市值用即時匯率，損益才含匯差（與已實現損益同口徑）
         const isUS = holding.market === "US";
-        const costTWD = isUS ? totalCostValue * rate : totalCostValue;
-        const valueTWD = isUS ? currentValue * rate : currentValue;
+        const costTWD = isUS ? totalCostValue * (holding.cost_fx ?? rate) : totalCostValue;
+        // 抓不到報價時以成本估值，避免市值當 0 變成假虧損
+        const valueTWD = currentPrice > 0 ? (isUS ? currentValue * rate : currentValue) : costTWD;
         const gainTWD = valueTWD - costTWD;
+        const gainPercent = costTWD > 0 ? (gainTWD / costTWD) * 100 : 0;
 
         return {
           ...holding,

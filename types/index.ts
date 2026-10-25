@@ -8,6 +8,7 @@ export interface Holding {
   market: "US" | "TW";
   created_at: string;
   updated_at: string;
+  cost_fx?: number | null; // 買入日 USD/TWD（台股為 1；抓不到為 null）
 }
 
 // 股票報價
