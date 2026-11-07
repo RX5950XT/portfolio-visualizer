@@ -7,6 +7,7 @@ import {
   isUsernameTaken,
   isValidUsername,
   normalizeUsername,
+  nowSeconds,
   resolvePortfolioIds,
   type GuestAccount,
 } from '@/lib/auth-config';
@@ -35,7 +36,8 @@ async function applyUpdate(
   }
 
   const password = typeof body?.password === 'string' ? body.password.trim() : '';
-  if (password) next = { ...next, password: hashPassword(password) };
+  // 改密碼就撤銷該訪客所有舊 token
+  if (password) next = { ...next, password: hashPassword(password), sessionsValidAfter: nowSeconds() };
 
   if (body?.portfolioIds !== undefined) {
     const portfolioIds = await resolvePortfolioIds(body.portfolioIds);

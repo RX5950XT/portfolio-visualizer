@@ -24,24 +24,45 @@ function daysAgo(days: number): string {
   return d.toISOString().split('T')[0];
 }
 
-// 清理過期沙盒。以 space 為單位而非靠 FK cascade + 各表自身 created_at：
-// 後者會留下「space 已死但子列未滿 24h」的孤兒，且沙盒被玩家刪光組合後就無列可判齡。
+// 判斷沙盒年齡用的時間欄位；cash_balance 沒有 created_at
+const DEMO_AGE_COLUMNS = {
+  portfolios: 'created_at',
+  holdings: 'created_at',
+  transactions: 'created_at',
+  cash_balance: 'updated_at',
+} as const;
+// 空間 id 會放進查詢網址，一次清太多會超過長度限制；剩下的下次登入再清
+const MAX_SPACES_PER_SWEEP = 100;
+
+// 任一列超過 24h 就代表該沙盒的登入已過期（token 只活 24h，所有列都在登入後才寫入）。
+// 不能只看 portfolios：玩家刪光組合後，其餘表的列會永遠沒人清。
+async function findExpiredSpaces(cutoff: string): Promise<string[]> {
+  const supabase = createServerClient();
+  const results = await Promise.all(
+    DEMO_TABLES.map((table) =>
+      supabase
+        .from(table)
+        .select('demo_space')
+        .not('demo_space', 'is', null)
+        .lt(DEMO_AGE_COLUMNS[table], cutoff)
+        .limit(1000)
+    )
+  );
+  const spaces = new Set<string>();
+  for (const { data, error } of results) {
+    if (error) console.error('掃描過期 demo 沙盒失敗:', error);
+    for (const row of (data ?? []) as { demo_space: string }[]) spaces.add(row.demo_space);
+  }
+  return [...spaces].slice(0, MAX_SPACES_PER_SWEEP);
+}
+
+// 清理過期沙盒。以 space 為單位而非靠 FK cascade + 各表自身時間：
+// 後者會留下「space 已死但子列未滿 24h」的孤兒。
 export async function sweepExpiredDemo(): Promise<void> {
   const supabase = createServerClient();
   const cutoff = new Date(Date.now() - DEMO_TTL_HOURS * 3600_000).toISOString();
 
-  const { data, error } = await supabase
-    .from('portfolios')
-    .select('demo_space')
-    .not('demo_space', 'is', null)
-    .lt('created_at', cutoff);
-
-  if (error) {
-    console.error('掃描過期 demo 沙盒失敗:', error);
-    return;
-  }
-
-  const spaces = [...new Set((data ?? []).map((r: { demo_space: string }) => r.demo_space))];
+  const spaces = await findExpiredSpaces(cutoff);
   if (spaces.length === 0) return;
 
   for (const table of DEMO_TABLES) {

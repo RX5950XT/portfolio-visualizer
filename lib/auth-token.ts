@@ -30,7 +30,7 @@ export function maxAgeForRole(role: UserRole): number {
 // id 皆為 crypto.randomUUID() 產生；限定字元集確保不含 '.' 而破壞 token 分段
 const ID_RE = /^[0-9a-f-]{36}$/;
 
-function getSecret(): string {
+export function getSecret(): string {
   const secret = process.env.AUTH_SECRET;
   if (!secret || secret.length < 32) {
     throw new Error(
@@ -122,6 +122,13 @@ export async function verifyAuthToken(
   }
 
   return null;
+}
+
+// 簽發時間由到期時間回推，不必改 token 格式：已登入的裝置不會因這次升級被登出。
+// 只能用在已通過 verifyAuthToken 的 token。
+export function tokenIssuedAt(token: string, role: UserRole): number {
+  const parts = token.split('.');
+  return Number(parts[parts.length - 2]) - maxAgeForRole(role);
 }
 
 function isUnexpired(expStr: string): boolean {

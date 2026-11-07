@@ -35,6 +35,7 @@
 - **Guest（訪客）**：唯讀；管理員可在 `/settings` 建立多組訪客帳號，逐一勾選每個帳號能看的投資組合。刪除帳號後該訪客立即被登出。
 - **Demo（試玩沙盒）**：登入頁按「直接進入 Demo」免帳密進入**每人專屬的獨立沙盒**（可於 `/settings` 開關），可自由增刪改體驗，
   碰不到管理員與訪客的任何資料；預設種子為「一年前各投入 NT$50 萬買 VT 與 0050」，24 小時後自動重置。不提供設定與 MCP 金鑰管理。
+- **登入保護**：同來源猜同一帳號 15 分鐘內最多 10 次（登入成功歸零），另有同來源 30 次、同帳號全來源 100 次的上限；Demo 同來源每小時 10 次、全站 300 次。改密碼會讓該帳號所有舊登入狀態失效。
 - **HMAC 簽章 Cookie**：認證 token 採 HMAC-SHA256 簽章，無法手動偽造（訪客帳號 id、demo 沙盒 id 亦納入簽章）。
 
 ---
@@ -106,6 +107,7 @@ SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 6. migrations/20260525_app_settings.sql             # 設定表（登入／MCP 設定，僅 service_role）
 7. migrations/20260525_revoke_anon_data_access.sql  # 安全修補：撤銷 anon/authenticated 的 Data API 權限
 8. migrations/20260716_demo_space.sql               # Demo 沙盒：4 表加 demo_space 欄位 + partial index
+9. migrations/20261107_auth_rate_limits.sql         # 登入與 Demo 次數限制（僅 service_role）
 ```
 
 > 已連結 Supabase CLI 者可改用 `npx supabase db push`（`supabase/migrations/` 內含對應的 app_settings 與 anon 撤銷 migration）。

@@ -2,6 +2,8 @@ import { createServerClient } from '@/lib/supabase';
 import { scopeQuery, stampSpace, type Session } from '@/lib/auth';
 import { fetchExchangeRate } from '@/lib/stocks';
 import { fetchFxHistory, buildDenseRateMap } from '@/lib/portfolio-history';
+import { taipeiDate } from '@/lib/chart-period';
+import { isValidNotes, isValidSymbol, isValidTradeDate, MAX_LOTS_PER_SELL, MAX_NOTES_LENGTH } from '@/lib/input-limits';
 
 // 網站 API 與 MCP 共用的新增／賣出流程；status < 500 的訊息可直接回給使用者。
 export class TradeError extends Error {
@@ -10,6 +12,34 @@ export class TradeError extends Error {
     super(message);
     this.status = status;
   }
+}
+
+// Demo 免登入，每個沙盒要有上限；否則灌資料可吃光資料庫額度，連帶影響真實資料。
+const DEMO_QUOTA = { portfolios: 20, holdings: 200, transactions: 500, cash_balance: 20 } as const;
+
+export async function assertDemoQuota(session: Session, table: keyof typeof DEMO_QUOTA): Promise<void> {
+  if (!session.demoSpace) return;
+  const { count, error } = await createServerClient()
+    .from(table)
+    .select('id', { count: 'exact', head: true })
+    .eq('demo_space', session.demoSpace);
+  if (error) {
+    console.error('檢查 Demo 額度失敗:', error);
+    throw new TradeError('檢查 Demo 額度失敗', 500);
+  }
+  if ((count ?? 0) >= DEMO_QUOTA[table]) {
+    throw new TradeError('Demo 資料已達上限，請重新進入 Demo 開新的沙盒', 403);
+  }
+}
+
+function assertTradeDate(value: unknown, label: string): void {
+  if (!isValidTradeDate(value, taipeiDate(new Date()))) {
+    throw new TradeError(`${label}格式錯誤，或晚於今天`, 400);
+  }
+}
+
+function assertSymbol(value: unknown): void {
+  if (!isValidSymbol(value)) throw new TradeError('股票代號格式錯誤', 400);
 }
 
 export interface NewHoldingInput {
@@ -27,6 +57,9 @@ export async function addHolding(session: Session, input: NewHoldingInput) {
   if (!symbol || !shares || !cost_price || !purchase_date) {
     throw new TradeError('請填寫所有必填欄位', 400);
   }
+  assertSymbol(symbol);
+  assertTradeDate(purchase_date, '買入日期');
+  await assertDemoQuota(session, 'holdings');
 
   // 判斷市場（台股或美股）
   const upperSymbol = symbol.toUpperCase();
@@ -122,6 +155,14 @@ export async function sellLots(session: Session, input: SellInput) {
   if (!Array.isArray(lot_ids) || lot_ids.length === 0 || !sellShares || !sellPrice || !transaction_date) {
     throw new TradeError('請填寫所有必填欄位', 400);
   }
+  if (lot_ids.length > MAX_LOTS_PER_SELL) {
+    throw new TradeError('批次數量過多', 400);
+  }
+  assertTradeDate(transaction_date, '賣出日期');
+  if (!isValidNotes(notes)) {
+    throw new TradeError(`備註最多 ${MAX_NOTES_LENGTH} 字`, 400);
+  }
+  await assertDemoQuota(session, 'transactions');
 
   const sellSharesNum = parseFloat(String(sellShares));
   const sellPriceNum = parseFloat(String(sellPrice));
@@ -310,6 +351,9 @@ export interface HoldingUpdateInput {
 export async function updateHolding(session: Session, id: string, input: HoldingUpdateInput) {
   const { symbol, shares, cost_price, purchase_date } = input;
 
+  if (symbol !== undefined) assertSymbol(symbol);
+  if (purchase_date !== undefined) assertTradeDate(purchase_date, '買入日期');
+
   const upperSymbol = symbol?.toUpperCase();
   const market = upperSymbol?.includes('.TW') ? 'TW' : 'US';
 
@@ -392,6 +436,7 @@ export async function setCash(session: Session, input: CashInput) {
       .single();
   } else {
     // 新增記錄
+    await assertDemoQuota(session, 'cash_balance');
     const insertData: { amount_twd: number; portfolio_id?: string; demo_space?: string } = {
       amount_twd,
       ...stampSpace(session),

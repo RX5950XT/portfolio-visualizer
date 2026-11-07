@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { X } from 'lucide-react';
 import type { AggregatedHolding } from '@/types';
+import { MAX_NOTES_LENGTH } from '@/lib/input-limits';
 
 interface Props {
   holding: AggregatedHolding;
@@ -202,6 +203,7 @@ export default function SellForm({ holding, portfolioId, exchangeRate, onClose, 
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               placeholder="例如：停損、獲利了結"
+              maxLength={MAX_NOTES_LENGTH}
               className="w-full"
             />
           </div>

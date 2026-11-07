@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireAdmin, verifyAdminPassword } from '@/lib/auth';
+import { requireAdmin, setAuthCookie, verifyAdminPassword } from '@/lib/auth';
 import {
   bootstrapAdminUsername,
   getAuthConfig,
@@ -7,6 +7,7 @@ import {
   hashPassword,
   isValidUsername,
   normalizeUsername,
+  nowSeconds,
 } from '@/lib/auth-config';
 
 // GET: 管理員帳號、demo 開關與訪客帳號清單；雜湊/salt 永不出網
@@ -74,10 +75,17 @@ export async function PUT(request: Request): Promise<NextResponse> {
 
     await saveAuthConfig({
       ...current,
-      adminAccount: { username, password },
+      adminAccount: {
+        username,
+        password,
+        // 改密碼就撤銷所有舊 token，否則被偷走的登入狀態還能再用 7 天
+        sessionsValidAfter: newPassword ? nowSeconds() : current.adminAccount?.sessionsValidAfter,
+      },
       demoEnabled:
         typeof body?.demoEnabled === 'boolean' ? body.demoEnabled : current.demoEnabled,
     });
+    // 上面撤銷了所有舊 token，發新的給這台，操作的人才不會被自己登出
+    if (newPassword) await setAuthCookie('admin');
     return NextResponse.json({ data: { success: true } });
   } catch (err) {
     console.error('儲存認證設定失敗:', err);

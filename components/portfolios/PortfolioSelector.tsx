@@ -11,6 +11,7 @@ import {
   FolderOpen,
 } from 'lucide-react';
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
+import { MAX_PORTFOLIO_NAME_LENGTH } from '@/lib/input-limits';
 
 interface Portfolio {
   id: string;
@@ -207,6 +208,7 @@ export default function PortfolioSelector({
                   <div className="flex items-center gap-2 flex-1">
                     <input
                       type="text"
+                      maxLength={MAX_PORTFOLIO_NAME_LENGTH}
                       value={inputValue}
                       onChange={(e) => setInputValue(e.target.value)}
                       onKeyDown={(e) => {
@@ -281,6 +283,7 @@ export default function PortfolioSelector({
                 <div className="flex items-center gap-2">
                   <input
                     type="text"
+                    maxLength={MAX_PORTFOLIO_NAME_LENGTH}
                     value={inputValue}
                     onChange={(e) => setInputValue(e.target.value)}
                     onKeyDown={(e) => {

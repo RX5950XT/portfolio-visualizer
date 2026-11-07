@@ -4,14 +4,14 @@ import { getMcpConfig, saveMcpConfig } from '@/lib/mcp-config';
 import { createMcpToken, hashMcpToken } from '@/lib/mcp-token';
 
 async function handleSettings(request: Request): Promise<NextResponse> {
-  if (await getUserRole() !== 'admin') {
-    return NextResponse.json({ error: '只有管理員可設定 MCP' }, { status: 403 });
-  }
-  const origin = request.headers.get('origin');
-  if (origin && origin !== new URL(request.url).origin) {
-    return NextResponse.json({ error: '不允許的來源' }, { status: 403 });
-  }
   try {
+    if (await getUserRole() !== 'admin') {
+      return NextResponse.json({ error: '只有管理員可設定 MCP' }, { status: 403 });
+    }
+    const origin = request.headers.get('origin');
+    if (origin && origin !== new URL(request.url).origin) {
+      return NextResponse.json({ error: '不允許的來源' }, { status: 403 });
+    }
     if (request.method === 'DELETE') {
       await saveMcpConfig(null);
       return NextResponse.json({ data: { enabled: false } });

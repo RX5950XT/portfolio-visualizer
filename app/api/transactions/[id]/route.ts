@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase';
 import { requireWriteSession, scopeQuery } from '@/lib/auth';
+import { isValidNotes, MAX_NOTES_LENGTH } from '@/lib/input-limits';
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -21,6 +22,9 @@ export async function PATCH(request: Request, { params }: RouteParams) {
     const notes = body.notes;
     if (notes !== null && typeof notes !== 'string') {
       return NextResponse.json({ error: 'notes 格式錯誤' }, { status: 400 });
+    }
+    if (!isValidNotes(notes)) {
+      return NextResponse.json({ error: `備註最多 ${MAX_NOTES_LENGTH} 字` }, { status: 400 });
     }
 
     const supabase = createServerClient();

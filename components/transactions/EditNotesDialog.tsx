@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { X } from 'lucide-react';
+import { MAX_NOTES_LENGTH } from '@/lib/input-limits';
 
 interface Props {
   symbol: string;
@@ -59,6 +60,7 @@ export default function EditNotesDialog({ symbol, initialNotes, onSave, onCancel
             value={value}
             onChange={(e) => setValue(e.target.value)}
             placeholder="例如：停損、獲利了結"
+            maxLength={MAX_NOTES_LENGTH}
             rows={3}
             autoFocus
             className="w-full resize-none"

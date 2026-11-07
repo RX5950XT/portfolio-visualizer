@@ -1,3 +1,14 @@
+# 任務：安全修補第 1～4 項（2026-11-07）
+
+- [x] 登入與 Demo 次數限制（`lib/rate-limit.ts`、`auth_rate_limits`，已套用正式庫）
+- [x] 改密碼撤銷舊憑證（`sessionsValidAfter`，由 token 到期時間回推簽發時間，不改 token 格式）
+- [x] 認證設定讀取失敗一律拋出，不退回 env 密碼、不開 Demo、不覆蓋帳號
+- [x] Demo 額度、輸入上限、過期清理涵蓋沒有組合的沙盒
+
+## Review
+
+- 隔離環境（Docker 本機 Supabase）實測 103 項；正式資料未被測試寫入。詳見 CONTEXT.md。
+
 # 任務：MCP 狀態確認、README 用法、配套 skill、提交（2026-10-16）
 
 - [x] MCP 全面驗證：25 單元測試、權限 31 項、4 組合對帳、分析工具與網站逐欄一致

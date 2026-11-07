@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase';
+import { MAX_PORTFOLIO_NAME_LENGTH } from '@/lib/input-limits';
 import {
   getSession,
   getVisiblePortfolioIdsForRole,
@@ -64,6 +65,9 @@ export async function PUT(request: Request, { params }: RouteParams) {
 
     if (Object.keys(updateData).length === 0) {
       return NextResponse.json({ error: '請提供要更新的欄位' }, { status: 400 });
+    }
+    if (typeof updateData.name === 'string' && updateData.name.length > MAX_PORTFOLIO_NAME_LENGTH) {
+      return NextResponse.json({ error: `組合名稱最多 ${MAX_PORTFOLIO_NAME_LENGTH} 字` }, { status: 400 });
     }
 
     const supabase = createServerClient();

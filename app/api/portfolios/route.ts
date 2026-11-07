@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase';
+import { MAX_PORTFOLIO_NAME_LENGTH } from '@/lib/input-limits';
+import { assertDemoQuota, TradeError } from '@/lib/trades';
 import {
   getSession,
   getVisiblePortfolioIdsForRole,
@@ -68,6 +70,10 @@ export async function POST(request: Request) {
     if (!name || typeof name !== 'string') {
       return NextResponse.json({ error: '請提供組合名稱' }, { status: 400 });
     }
+    if (name.trim().length > MAX_PORTFOLIO_NAME_LENGTH) {
+      return NextResponse.json({ error: `組合名稱最多 ${MAX_PORTFOLIO_NAME_LENGTH} 字` }, { status: 400 });
+    }
+    await assertDemoQuota(auth.session, 'portfolios');
 
     const supabase = createServerClient();
 
@@ -84,6 +90,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ data });
   } catch (err) {
+    if (err instanceof TradeError) return NextResponse.json({ error: err.message }, { status: err.status });
     console.error('建立投資組合錯誤:', err);
     return NextResponse.json({ error: '伺服器錯誤' }, { status: 500 });
   }

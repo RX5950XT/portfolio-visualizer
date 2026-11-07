@@ -3,6 +3,7 @@ import { cookies } from 'next/headers';
 import { createServerClient } from '@/lib/supabase';
 import {
   bootstrapAdminUsername,
+  burnPasswordCheck,
   getAuthConfig,
   normalizeUsername,
   verifyPasswordHash,
@@ -13,6 +14,7 @@ import {
   createAuthToken,
   maxAgeForRole,
   timingSafeEqual,
+  tokenIssuedAt,
   verifyAuthToken,
   type Session,
   type UserRole,
@@ -60,10 +62,13 @@ export async function verifyCredentials(
   }
 
   const guest = config.guestAccounts.find((g) => g.username === name);
-  if (guest && verifyPasswordHash(password, guest.password)) {
-    return { role: 'guest', guestId: guest.id };
+  if (!guest) {
+    burnPasswordCheck(password);
+    return null;
   }
-  return null;
+  return verifyPasswordHash(password, guest.password)
+    ? { role: 'guest', guestId: guest.id }
+    : null;
 }
 
 // 設定認證 Cookie（HMAC 簽章 token）
@@ -91,15 +96,36 @@ export async function clearAuthCookie(): Promise<void> {
 }
 
 // 取得當前 session（驗證簽章）
-// Why: 訪客帳號被管理員刪除後必須立即失效，簽章本身無法撤銷，故每次回查帳號是否仍存在
+// Why: 簽章本身無法撤銷，帳號被刪或改密碼後舊 token 仍驗得過，故每次回查帳號狀態。
+// 設定讀不到時會拋出（見 getAuthConfig），由呼叫端回錯誤，不會被當成已登入。
 export async function getSession(): Promise<Session | null> {
   const cookieStore = await cookies();
   const token = cookieStore.get(AUTH_COOKIE_NAME)?.value;
   const session = await verifyAuthToken(token);
-  if (session?.role === 'guest' && !(await findGuestPortfolioIds(session))) {
-    return null;
+  if (!token || !session || session.role === 'demo') return session;
+
+  const config = await getAuthConfig();
+  const account = session.role === 'admin'
+    ? config.adminAccount
+    : config.guestAccounts.find((g) => g.id === session.guestId);
+  // 管理員可能還在 env 首次引導階段（DB 沒有帳號），訪客則一定要存在
+  if (!account && session.role === 'guest') return null;
+  return tokenIssuedAt(token, session.role) < (account?.sessionsValidAfter ?? 0) ? null : session;
+}
+
+// 分析類路由共用：帳號設定暫時讀不到時回 503，不要變成沒有內容的 500
+export async function withSession(
+  handler: (session: Session) => Promise<Response>
+): Promise<Response> {
+  let session: Session | null;
+  try {
+    session = await getSession();
+  } catch (err) {
+    console.error('驗證登入狀態失敗:', err);
+    return NextResponse.json({ error: '服務暫時無法使用，請稍後再試' }, { status: 503 });
   }
-  return session;
+  if (!session) return NextResponse.json({ error: '未授權' }, { status: 401 });
+  return handler(session);
 }
 
 async function findGuestPortfolioIds(
@@ -154,11 +180,16 @@ export function stampSpace(session: Session): { demo_space?: string } {
 
 // 設定類端點：只放行 admin
 export async function requireAdmin(): Promise<NextResponse | null> {
-  const session = await getSession();
-  if (session?.role !== 'admin') {
-    return NextResponse.json({ error: '無權限執行此操作' }, { status: 403 });
+  try {
+    const session = await getSession();
+    if (session?.role !== 'admin') {
+      return NextResponse.json({ error: '無權限執行此操作' }, { status: 403 });
+    }
+    return null;
+  } catch (err) {
+    console.error('驗證管理員失敗:', err);
+    return NextResponse.json({ error: '服務暫時無法使用，請稍後再試' }, { status: 503 });
   }
-  return null;
 }
 
 type WriteAuth =
